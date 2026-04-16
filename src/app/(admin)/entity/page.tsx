@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Save } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { Tables } from "@/lib/supabase/types";
@@ -198,6 +198,10 @@ interface PlayerPayable {
 // ── Component ──────────────────────────────────────────────
 
 export default function EntityPage() {
+  return <Suspense><EntityPageContent /></Suspense>;
+}
+
+function EntityPageContent() {
   const supabase = useMemo(() => createClient(), []);
 
   // Data state

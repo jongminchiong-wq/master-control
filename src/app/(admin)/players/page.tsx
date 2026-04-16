@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, Pencil, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { Tables } from "@/lib/supabase/types";
@@ -151,6 +151,10 @@ function CommissionStatusBadge({ status }: { status: CommStatus }) {
 // ── Component ───────────────────────────────────────────────
 
 export default function PlayersPage() {
+  return <Suspense><PlayersPageContent /></Suspense>;
+}
+
+function PlayersPageContent() {
   const supabase = useMemo(() => createClient(), []);
 
   // Data state

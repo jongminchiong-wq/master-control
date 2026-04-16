@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { LayoutDashboard, Calculator } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 
@@ -15,7 +16,7 @@ export default function InvestorLayout({
 }) {
   return (
     <div className="flex h-screen">
-      <Sidebar navItems={navItems} />
+      <Suspense><Sidebar navItems={navItems} /></Suspense>
       <main className="flex-1 overflow-auto bg-gray-50 p-6">{children}</main>
     </div>
   );

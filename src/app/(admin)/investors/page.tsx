@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, Pencil, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { Tables } from "@/lib/supabase/types";
@@ -182,6 +182,10 @@ function calcIntroducerData(
 // ── Component ───────────────────────────────────────────────
 
 export default function InvestorsPage() {
+  return <Suspense><InvestorsPageContent /></Suspense>;
+}
+
+function InvestorsPageContent() {
   const supabase = useMemo(() => createClient(), []);
 
   // Data state

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Plus,
   Trash2,
@@ -202,6 +202,10 @@ const STAGES: StageInfo[] = [
 // ── Component ───────────────────────────────────────────────
 
 export default function POCyclePage() {
+  return <Suspense><POCyclePageContent /></Suspense>;
+}
+
+function POCyclePageContent() {
   const supabase = useMemo(() => createClient(), []);
 
   // Data state
