@@ -95,7 +95,7 @@ export default function InvestorSimulatorPage() {
   const maxRate = Math.max(...allBars.map((b) => b.rate), 1);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* ── Header ──────────────────────────────────────────── */}
       <h1 className="text-base font-medium text-gray-800">
         Return Simulator
@@ -104,7 +104,7 @@ export default function InvestorSimulatorPage() {
       {/* ── Summary MetricCards ─────────────────────────────── */}
       <div
         className={cn(
-          "grid gap-3",
+          "grid gap-4",
           simRecruits > 0 ? "grid-cols-4" : "grid-cols-3"
         )}
       >
@@ -137,7 +137,7 @@ export default function InvestorSimulatorPage() {
       </div>
 
       {/* ── Tier context info bar ──────────────────────────── */}
-      <div className="rounded-lg border border-gray-200 bg-white px-5 py-4">
+      <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs text-gray-500">
             {TIER_ICONS[simTier.name]?.("size-3.5 text-brand-600")}
@@ -156,7 +156,7 @@ export default function InvestorSimulatorPage() {
       </div>
 
       {/* ── Adjust Inputs ──────────────────────────────────── */}
-      <div className="rounded-lg border border-gray-200 bg-white px-5 py-4">
+      <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <p className="mb-4 text-xs font-medium uppercase tracking-wide text-gray-500">
           Adjust Inputs
         </p>
@@ -313,12 +313,12 @@ export default function InvestorSimulatorPage() {
 
       {/* ── Total monthly earnings (only if recruits > 0) ──── */}
       {simRecruits > 0 && (
-        <div className="rounded-lg border border-gray-200 bg-white px-5 py-4">
+        <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
           <p className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-500">
             Total Estimated Earnings
           </p>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-2xl bg-white px-5 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+          <div className="grid grid-cols-3 gap-4">
+            <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
               <p className="text-xs font-medium uppercase tracking-wide text-brand-600">
                 Monthly Total
               </p>
@@ -329,7 +329,7 @@ export default function InvestorSimulatorPage() {
                 {fmt(totalAnnual)}/year
               </p>
             </div>
-            <div className="rounded-2xl bg-white px-5 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+            <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
               <p className="text-xs font-medium uppercase tracking-wide text-success-600">
                 Investment
               </p>
@@ -340,7 +340,7 @@ export default function InvestorSimulatorPage() {
                 {fmt(annualReturn)}/year
               </p>
             </div>
-            <div className="rounded-2xl bg-white px-5 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+            <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
               <p className="text-xs font-medium uppercase tracking-wide text-purple-600">
                 Introducer
               </p>
@@ -356,7 +356,7 @@ export default function InvestorSimulatorPage() {
       )}
 
       {/* ── Investor Tier ──────────────────────────────────── */}
-      <div className="rounded-lg border border-brand-100 bg-white p-5">
+      <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <p className="mb-3 text-xs font-medium uppercase tracking-wide text-brand-600">
           Investor Tier
         </p>
@@ -371,7 +371,7 @@ export default function InvestorSimulatorPage() {
 
       {/* Introducer tier (conditional) */}
       {simRecruits > 0 && (
-        <div className="rounded-lg border border-purple-100 bg-white p-5">
+        <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
           <p className="mb-3 text-xs font-medium uppercase tracking-wide text-purple-600">
             Introducer Tier
           </p>
@@ -386,7 +386,7 @@ export default function InvestorSimulatorPage() {
       )}
 
       {/* ── Comparison chart ─────────────────────────────────── */}
-      <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-5">
+      <div className="rounded-2xl bg-white p-6 space-y-5 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
           Compared to Malaysian Investments
         </p>
@@ -451,7 +451,7 @@ export default function InvestorSimulatorPage() {
       </div>
 
       {/* ── How one cycle works ──────────────────────────────── */}
-      <div className="rounded-lg border border-gray-200 bg-white p-5">
+      <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <p className="mb-4 text-xs font-medium uppercase tracking-wide text-gray-500">
           How One Cycle Works
         </p>
@@ -545,7 +545,7 @@ export default function InvestorSimulatorPage() {
       </div>
 
       {/* ── Footer disclaimer ────────────────────────────────── */}
-      <div className="rounded-lg border border-gray-200 bg-gray-50 px-5 py-4">
+      <div className="rounded-2xl bg-gray-50 px-6 py-5 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <p className="text-[10px] leading-relaxed text-gray-500">
           Returns are estimates based on consistent cycle deployment. Actual
           returns may vary depending on deal availability and PO clearance

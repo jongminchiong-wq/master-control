@@ -569,7 +569,7 @@ export default function InvestorDashboardPage() {
               {fmt(totalDeployed)} deployed &middot; {utilisationPct}% utilised
             </SheetDescription>
           </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 pb-6">
+          <div className="flex-1 overflow-y-auto px-6 pb-6">
             {myDeployments.length === 0 ? (
               <p className="py-12 text-center text-xs text-gray-500">
                 No deployments this month.
@@ -656,10 +656,10 @@ export default function InvestorDashboardPage() {
               {myTier.rate}% per cycle
             </SheetDescription>
           </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 pb-6">
+          <div className="flex-1 overflow-y-auto px-6 pb-6">
             {/* Returns Summary */}
-            <div className="mb-6 grid grid-cols-3 gap-3">
-              <div className="rounded-2xl bg-white px-5 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+            <div className="mb-6 grid grid-cols-3 gap-4">
+              <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
                 <p className="text-xs font-medium uppercase tracking-wide text-success-600">
                   Earned
                 </p>
@@ -671,7 +671,7 @@ export default function InvestorDashboardPage() {
                   {completedDeps.length !== 1 ? "s" : ""}
                 </p>
               </div>
-              <div className="rounded-2xl bg-white px-5 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+              <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
                 <p className="text-xs font-medium uppercase tracking-wide text-amber-600">
                   Pending
                 </p>
@@ -683,7 +683,7 @@ export default function InvestorDashboardPage() {
                   {activeDeps.length !== 1 ? "s" : ""}
                 </p>
               </div>
-              <div className="rounded-2xl bg-white px-5 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+              <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
                 <p className="text-xs font-medium uppercase tracking-wide text-accent-600">
                   Combined
                 </p>
@@ -773,7 +773,7 @@ export default function InvestorDashboardPage() {
                 {fmt(totalCapitalIntroduced)} total capital
               </SheetDescription>
             </SheetHeader>
-            <div className="flex-1 overflow-y-auto px-4 pb-6">
+            <div className="flex-1 overflow-y-auto px-6 pb-6">
               {/* Tier info */}
               <div className="mb-4 flex gap-3 text-xs">
                 <span className="text-purple-600">
