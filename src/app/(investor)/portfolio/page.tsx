@@ -63,7 +63,6 @@ import {
   TrendingUp,
   Users,
   ArrowRight,
-  Star,
   Wallet,
   RefreshCw,
   ArrowDownToLine,
@@ -524,16 +523,6 @@ export default function InvestorDashboardPage() {
               </p>
             )}
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-accent-50 px-4 py-2">
-            <Star className="size-4 text-accent-600" strokeWidth={1.5} />
-            <span className="text-sm font-semibold text-accent-600">
-              {myTier.name}
-            </span>
-            <span className="font-mono text-sm font-bold text-accent-400">
-              {myTier.rate}%
-            </span>
-            <span className="text-xs text-accent-600">per cycle</span>
-          </div>
         </div>
 
         {/* Utilisation bar inside hero */}
@@ -746,11 +735,8 @@ export default function InvestorDashboardPage() {
 
       {/* ═══ TIER PROGRESS ═══ */}
       <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4">
           <p className="text-sm font-semibold text-gray-800">Investor Tier</p>
-          <p className="font-mono text-xs font-medium text-accent-600">
-            {myTier.name} &middot; {myTier.rate}% per cycle
-          </p>
         </div>
         <TierCard
           tier={myTier}

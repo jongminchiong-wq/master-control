@@ -9,7 +9,6 @@ import {
   Clock,
   PackageCheck,
   ArrowUpRight,
-  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -133,25 +132,6 @@ export default function InvestorSimulatorPage() {
         )}
       </div>
 
-      {/* ── Tier context info bar ──────────────────────────── */}
-      <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            {TIER_ICONS[simTier.name]?.("size-3.5 text-brand-600")}
-            <span>
-              {simTier.name} tier &middot; {rate}% per cycle &middot;{" "}
-              {cyclesPerYear.toFixed(1)} cycles/year
-            </span>
-          </div>
-          {simRecruits > 0 && (
-            <div className="flex items-center gap-1.5 text-xs text-gray-500">
-              <Users className="size-3.5 text-purple-600" strokeWidth={1.5} />
-              <span>+ {fmt(simIntroCommAnnual)} introducer/year</span>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* ── My Investment ─────────────────────────────────── */}
       <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <p className="mb-4 text-xs font-medium uppercase tracking-wide text-brand-600">
@@ -162,16 +142,9 @@ export default function InvestorSimulatorPage() {
           {/* Capital invested */}
           <div className="space-y-4">
             <p className="text-xs text-gray-500">Capital invested</p>
-            <div className="flex flex-wrap items-baseline gap-4">
-              <span className="font-mono text-xl font-medium tracking-tight text-brand-600">
-                {fmt(simCapital)}
-              </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-600">
-                {TIER_ICONS[simTier.name]?.("size-3.5 text-brand-600")}
-                {simTier.name}
-                <span className="font-mono text-brand-600">{rate}%</span>
-              </span>
-            </div>
+            <p className="font-mono text-xl font-medium tracking-tight text-brand-600">
+              {fmt(simCapital)}
+            </p>
             <Slider
               value={[simCapital]}
               onValueChange={(v) => setSimCapital(Array.isArray(v) ? v[0] : v)}
@@ -234,6 +207,9 @@ export default function InvestorSimulatorPage() {
               max={90}
               step={5}
             />
+            <p className="text-xs text-gray-500">
+              {cyclesPerYear.toFixed(1)} cycles/year
+            </p>
           </div>
         </div>
       </div>
