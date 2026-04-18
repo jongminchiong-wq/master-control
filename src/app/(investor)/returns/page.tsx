@@ -98,7 +98,7 @@ export default function InvestorSimulatorPage() {
 
   const allBars = [
     ...BENCHMARKS.map((b) => ({ ...b, isMC: false })),
-    { name: "Master Control", rate: annualPct, isMC: true },
+    { name: "BridgeConnect", rate: annualPct, isMC: true },
   ].sort((a, b) => a.rate - b.rate);
   const maxRate = Math.max(...allBars.map((b) => b.rate), 1);
 
@@ -399,7 +399,7 @@ export default function InvestorSimulatorPage() {
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm leading-relaxed text-gray-600">
-          At a {simCycleDays}-day cycle, Master Control delivers{" "}
+          At a {simCycleDays}-day cycle, BridgeConnect delivers{" "}
           <span className="font-mono font-medium text-brand-600">
             {fmtPct(annualPct)} p.a.
           </span>{" "}

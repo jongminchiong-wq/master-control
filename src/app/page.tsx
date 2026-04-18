@@ -3,7 +3,7 @@ export default function Home() {
     <main className="flex flex-1 items-center justify-center">
       <div className="text-center">
         <h1 className="text-2xl font-medium text-gray-800 mb-2">
-          Master Control
+          BridgeConnect
         </h1>
         <p className="text-sm text-gray-500">
           B2B procurement platform for oil &amp; gas MRO consumables

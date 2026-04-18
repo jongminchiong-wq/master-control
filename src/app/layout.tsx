@@ -16,7 +16,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Master Control",
+  title: "BridgeConnect",
   description: "B2B procurement platform for oil & gas MRO consumables",
 };
 

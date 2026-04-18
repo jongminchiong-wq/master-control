@@ -79,7 +79,7 @@ export default function LoginPage() {
                 className="text-brand-600"
                 size={36}
                 strokeWidth={1.5}
-                aria-label="Master Control"
+                aria-label="BridgeConnect"
               />
             </CardTitle>
             <CardDescription>Sign in to your account</CardDescription>
