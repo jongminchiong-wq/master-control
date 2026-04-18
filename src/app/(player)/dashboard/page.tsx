@@ -603,16 +603,18 @@ export default function PlayerDashboardPage() {
   return (
     <div className="space-y-6">
       {/* Header + Month Picker */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-base font-medium text-gray-800">
+      <div>
+        <div className="flex justify-end">
+          <MonthPicker
+            months={availableMonths}
+            value={selectedMonth}
+            onChange={setSelectedMonth}
+            color="brand"
+          />
+        </div>
+        <h1 className="mt-3 text-base font-medium text-gray-800">
           Welcome, Player
         </h1>
-        <MonthPicker
-          months={availableMonths}
-          value={selectedMonth}
-          onChange={setSelectedMonth}
-          color="brand"
-        />
       </div>
 
       {/* Summary Cards */}
@@ -621,6 +623,13 @@ export default function PlayerDashboardPage() {
           label="Total PO This Month"
           value={fmt(myTotalPO)}
           subtitle={`${myMonthPOs.length} PO${myMonthPOs.length !== 1 ? "s" : ""}`}
+          className="bg-brand-50 border border-brand-100"
+        />
+        <MetricCard
+          label="Total Earnings"
+          value={fmt(totalComm)}
+          color="success"
+          className="bg-success-50 border border-success-100"
         />
         <MetricCard label="EU Commission" value={fmt(myEUComm)} color="brand">
           <div className="mt-1 flex gap-2.5">
@@ -646,11 +655,6 @@ export default function PlayerDashboardPage() {
             </span>
           </div>
         </MetricCard>
-        <MetricCard
-          label="Total Earnings"
-          value={fmt(totalComm)}
-          color="success"
-        />
       </div>
 
       {/* Tier Progress Cards */}

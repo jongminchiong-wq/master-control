@@ -299,52 +299,40 @@ export default function PlayerSimulatorPage() {
             <MetricCard label={`COGS (${cogsPercent}%)`} value={fmt(cogs)} />
           </div>
 
-          {/* Pool card */}
-          <div
-            className={cn(
-              "rounded-lg border px-5 py-4 bg-gray-50",
-              pool > 0
-                ? "border-accent-100"
-                : "border-danger-100"
-            )}
+          {/* Total Estimated Monthly Earnings */}
+          <MetricCard
+            label="Total estimated monthly earnings"
+            value={fmt(totalMonthly)}
+            color="success"
           >
-            <p
-              className={cn(
-                "text-xs font-medium uppercase tracking-wide",
-                pool > 0 ? "text-accent-600" : "text-danger-600"
-              )}
-            >
-              Pool (after costs)
+            {numRecruits > 0 && (
+              <div className="mt-1 flex gap-2.5">
+                <span className="text-[10px] font-medium text-brand-600">
+                  EU {fmt(euAmt)}
+                </span>
+                <span className="text-[10px] font-medium text-purple-600">
+                  Intro {fmt(totalIntroAmt)}
+                </span>
+              </div>
+            )}
+          </MetricCard>
+        </div>
+
+        {/* My EU Commission (commission sub-card + tier progress) */}
+        <div className="space-y-4 rounded-lg border border-brand-100 bg-white p-5">
+          {/* Commission sub-card */}
+          <div className="rounded-lg border border-brand-100 bg-gray-50 px-5 py-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-brand-600">
+              My EU commission
             </p>
-            <p
-              className={cn(
-                "mt-1 font-mono text-xl font-medium",
-                pool > 0 ? "text-accent-600" : "text-danger-600"
-              )}
-            >
-              {fmt(pool)}
+            <p className="mt-1 font-mono text-xl font-medium text-brand-600">
+              {fmt(euAmt)}
             </p>
             <p className="mt-0.5 text-xs text-gray-500">
-              Gross {fmt(gross)}
-              {platformFee > 0 && <> &minus; Platform {fmt(platformFee)}</>}
-              {" "}&minus; Investor {fmt(investorFee)}
+              {euTier.name} · {euTier.rate}% of pool
             </p>
           </div>
 
-          {/* EU Commission card */}
-          <MetricCard
-            label="My EU commission"
-            value={fmt(euAmt)}
-            color="brand"
-            subtitle={`${euTier.name} · ${euTier.rate}% of pool`}
-          />
-        </div>
-
-        {/* My Tier Progress */}
-        <div className="space-y-4 rounded-lg border border-brand-100 bg-white p-5">
-          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-            My tier progress
-          </p>
           <TierCard
             tier={euTier}
             tiers={euTiers}
@@ -357,23 +345,12 @@ export default function PlayerSimulatorPage() {
         {/* Introducer Earnings (if recruits > 0) */}
         {numRecruits > 0 && (
           <div className="space-y-4 rounded-lg border border-purple-100 bg-white p-5">
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-              Introducer earnings
-            </p>
             <p className="text-xs text-gray-500">
               Group PO (mine + recruits):{" "}
               <span className="font-mono font-medium text-purple-600">
                 {fmt(totalGroupPO)}
               </span>
             </p>
-
-            <TierCard
-              tier={introTier}
-              tiers={introTiers}
-              volume={totalGroupPO}
-              color="purple"
-              label="of entity&rsquo;s share"
-            />
 
             {/* Introducer commission card */}
             <div className="rounded-lg border border-purple-100 bg-gray-50 px-5 py-4">
@@ -394,26 +371,16 @@ export default function PlayerSimulatorPage() {
                 recruit{numRecruits > 1 ? "s" : ""}
               </p>
             </div>
+
+            <TierCard
+              tier={introTier}
+              tiers={introTiers}
+              volume={totalGroupPO}
+              color="purple"
+              label="of entity&rsquo;s share"
+            />
           </div>
         )}
-
-        {/* Total Estimated Monthly Earnings */}
-        <MetricCard
-          label="Total estimated monthly earnings"
-          value={fmt(totalMonthly)}
-          color="success"
-        >
-          {numRecruits > 0 && (
-            <div className="mt-1 flex gap-2.5">
-              <span className="text-[10px] font-medium text-brand-600">
-                EU {fmt(euAmt)}
-              </span>
-              <span className="text-[10px] font-medium text-purple-600">
-                Intro {fmt(totalIntroAmt)}
-              </span>
-            </div>
-          )}
-        </MetricCard>
 
         {/* Disclaimer */}
         <footer className="border-t border-gray-200 pt-4">

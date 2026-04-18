@@ -381,19 +381,21 @@ function PlayersPageContent() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div>
+        <div className="flex justify-end">
+          <MonthPicker
+            months={availableMonths}
+            value={selectedMonth}
+            onChange={setSelectedMonth}
+            color="brand"
+          />
+        </div>
+        <div className="mt-3">
           <h1 className="text-lg font-medium text-gray-800">Players</h1>
           <p className="text-xs text-gray-500">
             Manage end-users and view their commissions
           </p>
         </div>
-        <MonthPicker
-          months={availableMonths}
-          value={selectedMonth}
-          onChange={setSelectedMonth}
-          color="brand"
-        />
       </div>
 
       {/* Summary cards */}

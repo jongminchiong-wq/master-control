@@ -16,6 +16,13 @@ import {
   type Deployment,
 } from "@/lib/business-logic/deployment";
 import { fmt, getMonth, fmtMonth } from "@/lib/business-logic/formatters";
+import {
+  shouldAutoCompound,
+  daysUntilCompound,
+  wouldUpgradeTier,
+  estimateAnnualCompound,
+  COMPOUND_WINDOW_DAYS,
+} from "@/lib/business-logic/compounding";
 
 // Shared components
 import { TierCard } from "@/components/tier-card";
@@ -23,6 +30,8 @@ import { ChannelBadge } from "@/components/channel-badge";
 import { MonthPicker } from "@/components/month-picker";
 
 // UI components
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableHeader,
@@ -38,6 +47,15 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
 
 // Icons
 import {
@@ -46,11 +64,16 @@ import {
   Users,
   ArrowRight,
   Star,
+  Wallet,
+  RefreshCw,
+  ArrowDownToLine,
+  Clock,
 } from "lucide-react";
 
 // ── Types ───────────────────────────────────────────────────
 
 type DBInvestor = Tables<"investors">;
+type DBWithdrawal = Tables<"withdrawals">;
 type DBPO = Tables<"purchase_orders"> & {
   delivery_orders: Tables<"delivery_orders">[];
 };
@@ -128,6 +151,16 @@ export default function InvestorDashboardPage() {
   const [deploymentsOpen, setDeploymentsOpen] = useState(false);
   const [returnsOpen, setReturnsOpen] = useState(false);
   const [introOpen, setIntroOpen] = useState(false);
+  const [withdrawalsOpen, setWithdrawalsOpen] = useState(false);
+
+  // Withdrawal dialog state
+  const [showWithdrawDialog, setShowWithdrawDialog] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [reinvesting, setReinvesting] = useState(false);
+
+  // Withdrawal history
+  const [myWithdrawals, setMyWithdrawals] = useState<DBWithdrawal[]>([]);
 
   // Month selector
   const now = new Date();
@@ -164,7 +197,7 @@ export default function InvestorDashboardPage() {
 
     setMyInvestor(investorData);
 
-    const [investorsRes, posRes] = await Promise.all([
+    const [investorsRes, posRes, withdrawalsRes] = await Promise.all([
       supabase
         .from("investors")
         .select("*")
@@ -173,10 +206,36 @@ export default function InvestorDashboardPage() {
         .from("purchase_orders")
         .select("*, delivery_orders(*)")
         .order("po_date", { ascending: true }),
+      supabase
+        .from("withdrawals")
+        .select("*")
+        .eq("investor_id", investorData.id)
+        .order("requested_at", { ascending: false }),
     ]);
 
     if (investorsRes.data) setAllInvestors(investorsRes.data);
     if (posRes.data) setAllPOs(posRes.data as DBPO[]);
+    if (withdrawalsRes.data) setMyWithdrawals(withdrawalsRes.data);
+
+    // Auto-compound on read: if compound window has passed, compound automatically
+    if (
+      investorData.cash_balance > 0 &&
+      shouldAutoCompound(investorData.compound_at)
+    ) {
+      await supabase.rpc("reinvest_cash", {
+        p_investor_id: investorData.id,
+        p_source: "auto",
+      });
+
+      // Refresh investor data after compound
+      const { data: refreshed } = await supabase
+        .from("investors")
+        .select("*")
+        .eq("id", investorData.id)
+        .single();
+      if (refreshed) setMyInvestor(refreshed);
+    }
+
     setLoading(false);
   }, [supabase]);
 
@@ -316,6 +375,70 @@ export default function InvestorDashboardPage() {
   );
   const totalIntroComm = totalIntroCommEarned + totalIntroCommPending;
 
+  // ── Cash balance helpers ──────────────────────────────────
+
+  const cashBalance = myInvestor?.cash_balance ?? 0;
+  const compoundDaysLeft = daysUntilCompound(myInvestor?.compound_at ?? null);
+  const tierUpgrade = myInvestor
+    ? wouldUpgradeTier(myInvestor.capital, cashBalance)
+    : null;
+
+  // ── Withdrawal handler ──────────────────────────────────
+
+  async function handleWithdraw() {
+    if (!myInvestor) return;
+    const amount = parseFloat(withdrawAmount);
+    if (!amount || amount <= 0 || amount > cashBalance) return;
+
+    setWithdrawing(true);
+
+    const { data, error } = await supabase.rpc("submit_withdrawal", {
+      p_investor_id: myInvestor.id,
+      p_amount: amount,
+      p_type: "returns",
+    });
+
+    const result = data as { success: boolean; error?: string } | null;
+    if (error || !result?.success) {
+      console.error("Withdrawal failed:", error?.message || result?.error);
+    }
+
+    setWithdrawing(false);
+    setShowWithdrawDialog(false);
+    setWithdrawAmount("");
+    fetchData();
+  }
+
+  // ── Reinvest handler ────────────────────────────────────
+
+  async function handleReinvest() {
+    if (!myInvestor || cashBalance <= 0) return;
+
+    setReinvesting(true);
+
+    const { data: reinvestData, error: reinvestError } = await supabase.rpc(
+      "reinvest_cash",
+      {
+        p_investor_id: myInvestor.id,
+        p_source: "manual_reinvest",
+      }
+    );
+
+    const reinvestResult = reinvestData as {
+      success: boolean;
+      error?: string;
+    } | null;
+    if (reinvestError || !reinvestResult?.success) {
+      console.error(
+        "Reinvest failed:",
+        reinvestError?.message || reinvestResult?.error
+      );
+    }
+
+    setReinvesting(false);
+    fetchData();
+  }
+
   // ── Loading state ─────────────────────────────────────────
 
   if (loading) {
@@ -359,8 +482,7 @@ export default function InvestorDashboardPage() {
   return (
     <div className="space-y-5">
       {/* Header + Month Picker */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-base font-medium text-gray-800">Portfolio</h1>
+      <div className="flex items-center justify-end">
         <MonthPicker
           months={availableMonths}
           value={selectedMonth}
@@ -373,7 +495,7 @@ export default function InvestorDashboardPage() {
       <div className="rounded-2xl bg-white p-8 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-sm text-gray-500">Your capital</p>
+            <p className="text-sm text-gray-500">Portfolio Value</p>
             <p className="mt-2 font-mono text-3xl font-semibold tracking-tight text-gray-900">
               {fmt(myInvestor.capital)}
             </p>
@@ -431,6 +553,76 @@ export default function InvestorDashboardPage() {
           </div>
         )}
       </div>
+
+      {/* ═══ CASH BALANCE CARD ═══ */}
+      {cashBalance > 0 && (
+        <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)] ring-1 ring-brand-200">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="flex size-8 items-center justify-center rounded-lg bg-brand-50">
+                  <Wallet className="size-4 text-brand-600" strokeWidth={1.5} />
+                </div>
+                <p className="text-sm font-medium text-gray-800">Cash Balance</p>
+              </div>
+              <p className="mt-3 font-mono text-2xl font-semibold text-brand-600">
+                {fmt(cashBalance)}
+              </p>
+              <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-500">
+                <Clock className="size-3" />
+                {compoundDaysLeft !== null && compoundDaysLeft > 0
+                  ? `Auto-compounds in ${compoundDaysLeft} day${compoundDaysLeft > 1 ? "s" : ""}`
+                  : "Ready to compound"}
+              </div>
+              {tierUpgrade?.upgrades && (
+                <p className="mt-2 text-xs font-medium text-brand-600">
+                  Reinvesting unlocks {tierUpgrade.to.name} tier ({tierUpgrade.to.rate}%)
+                </p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-gray-600"
+                onClick={() => {
+                  setWithdrawAmount("");
+                  setShowWithdrawDialog(true);
+                }}
+              >
+                <ArrowDownToLine className="size-3.5" data-icon="inline-start" />
+                Withdraw
+              </Button>
+              <Button
+                size="sm"
+                className="bg-brand-600 text-white hover:bg-brand-800"
+                onClick={handleReinvest}
+                disabled={reinvesting}
+              >
+                <RefreshCw className="size-3.5" data-icon="inline-start" />
+                {reinvesting ? "Reinvesting..." : "Reinvest Now"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pending withdrawals notice */}
+      {myWithdrawals.some((w) => w.status === "pending") && (
+        <button
+          type="button"
+          onClick={() => setWithdrawalsOpen(true)}
+          className="flex w-full items-center justify-between rounded-xl bg-amber-50 px-5 py-3 text-left ring-1 ring-amber-200 transition-colors hover:bg-amber-100/50"
+        >
+          <div className="flex items-center gap-2">
+            <Clock className="size-4 text-amber-600" />
+            <p className="text-sm font-medium text-amber-800">
+              {myWithdrawals.filter((w) => w.status === "pending").length} withdrawal request{myWithdrawals.filter((w) => w.status === "pending").length > 1 ? "s" : ""} pending approval
+            </p>
+          </div>
+          <ArrowRight className="size-4 text-amber-600" />
+        </button>
+      )}
 
       {/* ═══ SUMMARY CARDS ═══ */}
       <div
@@ -505,12 +697,22 @@ export default function InvestorDashboardPage() {
               <Users className="size-5 text-purple-600" strokeWidth={1.5} />
             </div>
             <p className="text-xs font-medium text-gray-500">
-              Introducer Network
+              Introducer Commission
             </p>
             <p className="mt-1 font-mono text-xl font-semibold text-purple-600">
-              {fmt(totalIntroComm)}
+              {fmt(totalIntroCommEarned)}
             </p>
-            <p className="mt-1 text-xs text-gray-500">
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+              <span className="text-[11px] font-medium text-success-600">
+                Earned
+              </span>
+              {totalIntroCommPending > 0 && (
+                <span className="text-[11px] font-medium text-amber-600">
+                  {fmt(totalIntroCommPending)} pending
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs text-gray-500">
               {myRecruits.length} investor
               {myRecruits.length !== 1 ? "s" : ""} &middot;{" "}
               {fmt(totalCapitalIntroduced)} capital
@@ -538,6 +740,24 @@ export default function InvestorDashboardPage() {
           color="brand"
           label="per cycle"
         />
+        {/* Compound projection */}
+        {myInvestor.capital > 0 && (() => {
+          const projection = estimateAnnualCompound(myInvestor.capital, 60);
+          return (
+            <div className="mt-4 rounded-lg bg-brand-50/50 px-4 py-3">
+              <p className="text-xs font-medium text-brand-800">
+                Compound Projection (12 months)
+              </p>
+              <p className="mt-1 text-xs text-brand-600">
+                At the current rate with auto-compounding, your{" "}
+                <span className="font-mono font-medium">{fmt(myInvestor.capital)}</span>{" "}
+                could grow to{" "}
+                <span className="font-mono font-semibold">{fmt(projection.finalCapital)}</span>{" "}
+                ({projection.annualPct.toFixed(1)}% effective annual return).
+              </p>
+            </div>
+          );
+        })()}
       </div>
 
       {/* ═══ SIMULATOR TEASER ═══ */}
@@ -558,18 +778,18 @@ export default function InvestorDashboardPage() {
         </Link>
       </div>
 
-      {/* ═══ SHEET 1: DEPLOYMENTS ═══ */}
-      <Sheet open={deploymentsOpen} onOpenChange={setDeploymentsOpen}>
-        <SheetContent side="right" className="w-[80vw] sm:max-w-[80vw]">
-          <SheetHeader>
-            <SheetTitle>My Deployments</SheetTitle>
-            <SheetDescription>
+      {/* ═══ DIALOG 1: DEPLOYMENTS ═══ */}
+      <Dialog open={deploymentsOpen} onOpenChange={setDeploymentsOpen}>
+        <DialogContent className="rounded-2xl p-6 sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>My Deployments</DialogTitle>
+            <DialogDescription>
               {myDeployments.length} PO
               {myDeployments.length !== 1 ? "s" : ""} &middot;{" "}
               {fmt(totalDeployed)} deployed &middot; {utilisationPct}% utilised
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-6 pb-6">
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[65vh] overflow-y-auto">
             {myDeployments.length === 0 ? (
               <p className="py-12 text-center text-xs text-gray-500">
                 No deployments this month.
@@ -643,20 +863,20 @@ export default function InvestorDashboardPage() {
               </Table>
             )}
           </div>
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
-      {/* ═══ SHEET 2: RETURNS ═══ */}
-      <Sheet open={returnsOpen} onOpenChange={setReturnsOpen}>
-        <SheetContent side="right" className="w-[80vw] sm:max-w-[80vw]">
-          <SheetHeader>
-            <SheetTitle>Investment Returns</SheetTitle>
-            <SheetDescription>
+      {/* ═══ DIALOG 2: RETURNS ═══ */}
+      <Dialog open={returnsOpen} onOpenChange={setReturnsOpen}>
+        <DialogContent className="rounded-2xl p-6 sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Investment Returns</DialogTitle>
+            <DialogDescription>
               {fmt(totalReturns + pendingReturns)} total &middot;{" "}
               {myTier.rate}% per cycle
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-6 pb-6">
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[65vh] overflow-y-auto">
             {/* Returns Summary */}
             <div className="mb-6 grid grid-cols-3 gap-4">
               <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
@@ -758,22 +978,175 @@ export default function InvestorDashboardPage() {
               </Table>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ WITHDRAW DIALOG ═══ */}
+      <Dialog open={showWithdrawDialog} onOpenChange={setShowWithdrawDialog}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Withdraw Funds</DialogTitle>
+            <DialogDescription>
+              Request a withdrawal from your cash balance of{" "}
+              <span className="font-mono font-medium text-brand-600">
+                {fmt(cashBalance)}
+              </span>
+              . Your request will be sent to admin for approval.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">
+                Amount (RM)
+              </label>
+              <Input
+                type="number"
+                value={withdrawAmount}
+                onChange={(e) => setWithdrawAmount(e.target.value)}
+                placeholder={`Max ${fmt(cashBalance)}`}
+                max={cashBalance}
+                min={1}
+              />
+              {parseFloat(withdrawAmount) > cashBalance && (
+                <p className="mt-1 text-xs text-danger-600">
+                  Amount exceeds your cash balance
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              className="text-xs font-medium text-brand-600 hover:text-brand-800"
+              onClick={() => setWithdrawAmount(String(cashBalance))}
+            >
+              Withdraw all ({fmt(cashBalance)})
+            </button>
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button
+              className="bg-brand-600 text-white hover:bg-brand-800"
+              onClick={handleWithdraw}
+              disabled={
+                withdrawing ||
+                !withdrawAmount ||
+                parseFloat(withdrawAmount) <= 0 ||
+                parseFloat(withdrawAmount) > cashBalance
+              }
+            >
+              {withdrawing ? "Submitting..." : "Submit Request"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ SHEET 4: WITHDRAWAL HISTORY ═══ */}
+      <Sheet open={withdrawalsOpen} onOpenChange={setWithdrawalsOpen}>
+        <SheetContent side="right" className="w-[80vw] sm:max-w-[80vw]">
+          <SheetHeader>
+            <SheetTitle>Withdrawal History</SheetTitle>
+            <SheetDescription>
+              {myWithdrawals.length} request
+              {myWithdrawals.length !== 1 ? "s" : ""}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-6 pb-6">
+            {myWithdrawals.length === 0 ? (
+              <p className="py-12 text-center text-xs text-gray-500">
+                No withdrawal requests yet.
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-[10px]">Date</TableHead>
+                    <TableHead className="text-right text-[10px]">
+                      Amount
+                    </TableHead>
+                    <TableHead className="text-[10px]">Type</TableHead>
+                    <TableHead className="text-[10px]">Status</TableHead>
+                    <TableHead className="text-[10px]">Notes</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {myWithdrawals.map((w) => {
+                    const statusConfig: Record<
+                      string,
+                      { label: string; bg: string; text: string }
+                    > = {
+                      pending: {
+                        label: "Pending",
+                        bg: "bg-amber-50",
+                        text: "text-amber-600",
+                      },
+                      approved: {
+                        label: "Approved",
+                        bg: "bg-accent-50",
+                        text: "text-accent-600",
+                      },
+                      rejected: {
+                        label: "Rejected",
+                        bg: "bg-danger-50",
+                        text: "text-danger-600",
+                      },
+                      completed: {
+                        label: "Completed",
+                        bg: "bg-success-50",
+                        text: "text-success-600",
+                      },
+                    };
+                    const sc = statusConfig[w.status] ?? statusConfig.pending;
+                    return (
+                      <TableRow key={w.id}>
+                        <TableCell className="text-xs text-gray-500">
+                          {w.requested_at
+                            ? new Date(w.requested_at).toLocaleDateString()
+                            : "--"}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs font-medium text-brand-600">
+                          {fmt(w.amount)}
+                        </TableCell>
+                        <TableCell className="text-xs capitalize text-gray-500">
+                          {w.type}
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium",
+                              sc.bg,
+                              sc.text
+                            )}
+                          >
+                            {sc.label}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-xs text-gray-500">
+                          {w.notes ?? "--"}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+          </div>
         </SheetContent>
       </Sheet>
 
-      {/* ═══ SHEET 3: INTRODUCER NETWORK ═══ */}
+      {/* ═══ DIALOG 3: INTRODUCER NETWORK ═══ */}
       {myRecruits.length > 0 && (
-        <Sheet open={introOpen} onOpenChange={setIntroOpen}>
-          <SheetContent side="right" className="w-[80vw] sm:max-w-[80vw]">
-            <SheetHeader>
-              <SheetTitle>Introducer Network</SheetTitle>
-              <SheetDescription>
+        <Dialog open={introOpen} onOpenChange={setIntroOpen}>
+          <DialogContent className="rounded-2xl p-6 sm:max-w-5xl">
+            <DialogHeader>
+              <DialogTitle>Introducer Network</DialogTitle>
+              <DialogDescription>
                 {myRecruits.length} investor
                 {myRecruits.length !== 1 ? "s" : ""} introduced &middot;{" "}
                 {fmt(totalCapitalIntroduced)} total capital
-              </SheetDescription>
-            </SheetHeader>
-            <div className="flex-1 overflow-y-auto px-6 pb-6">
+              </DialogDescription>
+            </DialogHeader>
+            <div className="max-h-[65vh] overflow-y-auto">
               {/* Tier info */}
               <div className="mb-4 flex gap-3 text-xs">
                 <span className="text-purple-600">
@@ -846,8 +1219,8 @@ export default function InvestorDashboardPage() {
                 investors&apos; returns. Earned when their cycles complete.
               </p>
             </div>
-          </SheetContent>
-        </Sheet>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

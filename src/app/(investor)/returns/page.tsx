@@ -36,8 +36,8 @@ const TIER_ICONS: Record<string, (className: string) => React.ReactNode> = {
 const BENCHMARKS = [
   { name: "Fixed Deposit", rate: 3.5 },
   { name: "ASB", rate: 5.0 },
-  { name: "REIT", rate: 6.0 },
-  { name: "P2P Lending", rate: 13.0 },
+  { name: "Unit Trust", rate: 8.0 },
+  { name: "P2P Lending", rate: 12.0 },
 ];
 
 // ── Format helpers ─────────────────────────────────────────
@@ -76,6 +76,14 @@ export default function InvestorSimulatorPage() {
 
   const simTotalIntroCapital = simRecruits * simRecruitCapital;
   const simIntroTier = getInvIntroTier(simTotalIntroCapital);
+  const simIntroTierIdx = INV_INTRO_TIERS.findIndex((t) => t.name === simIntroTier.name);
+  const simNextIntroTier =
+    simIntroTierIdx < INV_INTRO_TIERS.length - 1
+      ? INV_INTRO_TIERS[simIntroTierIdx + 1]
+      : null;
+  const simIntroTierRemaining = simNextIntroTier
+    ? Math.max(0, simNextIntroTier.min - simTotalIntroCapital)
+    : 0;
   const simRecruitTier = getTier(simRecruitCapital, INV_TIERS);
   const simRecruitReturn = simRecruitCapital * (simRecruitTier.rate / 100);
   const simTotalRecruitReturns = simRecruits * simRecruitReturn;
@@ -96,16 +104,11 @@ export default function InvestorSimulatorPage() {
 
   return (
     <div className="space-y-5">
-      {/* ── Header ──────────────────────────────────────────── */}
-      <h1 className="text-base font-medium text-gray-800">
-        Return Simulator
-      </h1>
-
       {/* ── Summary MetricCards ─────────────────────────────── */}
       <div
         className={cn(
           "grid gap-4",
-          simRecruits > 0 ? "grid-cols-4" : "grid-cols-3"
+          simRecruits > 0 ? "grid-cols-3" : "grid-cols-2"
         )}
       >
         <MetricCard
@@ -120,17 +123,11 @@ export default function InvestorSimulatorPage() {
           subtitle={`${rate}% of ${fmt(simCapital)}`}
           color="success"
         />
-        <MetricCard
-          label="Monthly Average"
-          value={fmt(monthlyReturn)}
-          subtitle={`${simCycleDays}-day cycles`}
-          color="default"
-        />
         {simRecruits > 0 && (
           <MetricCard
             label="Intro Commission"
-            value={fmt(simIntroCommMonthly)}
-            subtitle={`${fmt(simIntroCommAnnual)}/year`}
+            value={fmt(simIntroCommAnnual)}
+            subtitle={`${fmt(simIntroCommMonthly)}/month`}
             color="purple"
           />
         )}
@@ -155,10 +152,10 @@ export default function InvestorSimulatorPage() {
         </div>
       </div>
 
-      {/* ── Adjust Inputs ──────────────────────────────────── */}
+      {/* ── My Investment ─────────────────────────────────── */}
       <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-        <p className="mb-4 text-xs font-medium uppercase tracking-wide text-gray-500">
-          Adjust Inputs
+        <p className="mb-4 text-xs font-medium uppercase tracking-wide text-brand-600">
+          My Investment
         </p>
 
         <div className="space-y-6">
@@ -238,152 +235,118 @@ export default function InvestorSimulatorPage() {
               step={5}
             />
           </div>
-
-          {/* ── Introducer section ────────────────────────────── */}
-          <div className="space-y-6 border-t border-gray-200 pt-6">
-            <p className="text-xs font-medium uppercase tracking-wide text-purple-600">
-              Introduce Other Investors
-            </p>
-
-            {/* Number of recruits */}
-            <div className="space-y-3">
-              <div className="flex items-baseline justify-between">
-                <span className="text-xs text-gray-500">
-                  Investors I introduce
-                </span>
-                <span className="font-mono text-sm font-medium text-gray-800">
-                  {simRecruits}
-                </span>
-              </div>
-              <Slider
-                value={[simRecruits]}
-                onValueChange={(v) =>
-                  setSimRecruits(Array.isArray(v) ? v[0] : v)
-                }
-                min={0}
-                max={10}
-                step={1}
-              />
-            </div>
-
-            {/* Avg capital per recruit */}
-            {simRecruits > 0 && (
-              <>
-                <div className="space-y-3">
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-xs text-gray-500">
-                      Avg capital per recruit
-                    </span>
-                    <span className="font-mono text-sm font-medium text-gray-800">
-                      {fmt(simRecruitCapital)}
-                    </span>
-                  </div>
-                  <Slider
-                    value={[simRecruitCapital]}
-                    onValueChange={(v) =>
-                      setSimRecruitCapital(Array.isArray(v) ? v[0] : v)
-                    }
-                    min={5000}
-                    max={200000}
-                    step={5000}
-                  />
-                  <p className="text-[11px] text-gray-500">
-                    {simRecruits} x {fmt(simRecruitCapital)} ={" "}
-                    {fmt(simTotalIntroCapital)} total introduced
-                  </p>
-                </div>
-
-                {/* Intro tier summary */}
-                <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs leading-relaxed text-gray-600">
-                  Your tier:{" "}
-                  <span className="font-mono font-medium text-purple-600">
-                    {simIntroTier.name} ({simIntroTier.rate}%)
-                  </span>{" "}
-                  &mdash; you earn{" "}
-                  <span className="font-mono font-medium text-brand-600">
-                    {fmt(simIntroCommMonthly)}/month
-                  </span>{" "}
-                  from your recruits&apos; returns.
-                </div>
-              </>
-            )}
-          </div>
         </div>
       </div>
 
-      {/* ── Total monthly earnings (only if recruits > 0) ──── */}
+      {/* ── Introducer Earnings (standalone card) ─────────── */}
       {simRecruits > 0 && (
         <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-          <p className="mb-3 text-xs font-medium uppercase tracking-wide text-gray-500">
-            Total Estimated Earnings
+          <p className="text-xs font-medium uppercase tracking-wide text-purple-600">
+            Introducer Earnings
           </p>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-              <p className="text-xs font-medium uppercase tracking-wide text-brand-600">
-                Monthly Total
-              </p>
-              <p className="mt-1.5 font-mono text-lg font-medium text-brand-600">
-                {fmt(totalMonthly)}
-              </p>
-              <p className="mt-1 text-xs text-gray-500">
-                {fmt(totalAnnual)}/year
-              </p>
-            </div>
-            <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-              <p className="text-xs font-medium uppercase tracking-wide text-success-600">
-                Investment
-              </p>
-              <p className="mt-1.5 font-mono text-lg font-medium text-success-600">
-                {fmt(monthlyReturn)}
-              </p>
-              <p className="mt-1 text-xs text-gray-500">
-                {fmt(annualReturn)}/year
-              </p>
-            </div>
-            <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-              <p className="text-xs font-medium uppercase tracking-wide text-purple-600">
-                Introducer
-              </p>
-              <p className="mt-1.5 font-mono text-lg font-medium text-purple-600">
-                {fmt(simIntroCommMonthly)}
-              </p>
-              <p className="mt-1 text-xs text-gray-500">
-                {fmt(simIntroCommAnnual)}/year
-              </p>
-            </div>
-          </div>
+          <p className="mt-1.5 font-mono text-lg font-medium text-purple-600">
+            {fmt(simIntroCommAnnual)}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            {fmt(simIntroCommMonthly)}/month
+          </p>
         </div>
       )}
 
-      {/* ── Investor Tier ──────────────────────────────────── */}
+      {/* ── Introduce Other Investors ─────────────────────── */}
       <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-        <p className="mb-3 text-xs font-medium uppercase tracking-wide text-brand-600">
-          Investor Tier
+        <p className="mb-4 text-xs font-medium uppercase tracking-wide text-purple-600">
+          Introduce Other Investors
         </p>
-        <TierCard
-          tier={simTier}
-          tiers={INV_TIERS}
-          volume={simCapital}
-          color="brand"
-          label="per cycle"
-        />
-      </div>
 
-      {/* Introducer tier (conditional) */}
-      {simRecruits > 0 && (
-        <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-          <p className="mb-3 text-xs font-medium uppercase tracking-wide text-purple-600">
-            Introducer Tier
-          </p>
-          <TierCard
-            tier={simIntroTier}
-            tiers={INV_INTRO_TIERS}
-            volume={simTotalIntroCapital}
-            color="purple"
-            label="of investor return"
-          />
+        <div className="space-y-6">
+          {/* Number of recruits */}
+          <div className="space-y-3">
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs text-gray-500">
+                Investors I introduce
+              </span>
+              <span className="font-mono text-sm font-medium text-gray-800">
+                {simRecruits}
+              </span>
+            </div>
+            <Slider
+              value={[simRecruits]}
+              onValueChange={(v) =>
+                setSimRecruits(Array.isArray(v) ? v[0] : v)
+              }
+              min={0}
+              max={10}
+              step={1}
+            />
+          </div>
+
+          {/* Avg capital per recruit */}
+          {simRecruits > 0 && (
+            <>
+              <div className="space-y-3">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xs text-gray-500">
+                    Avg capital per recruit
+                  </span>
+                  <span className="font-mono text-sm font-medium text-gray-800">
+                    {fmt(simRecruitCapital)}
+                  </span>
+                </div>
+                <Slider
+                  value={[simRecruitCapital]}
+                  onValueChange={(v) =>
+                    setSimRecruitCapital(Array.isArray(v) ? v[0] : v)
+                  }
+                  min={5000}
+                  max={200000}
+                  step={5000}
+                />
+                <p className="text-[11px] text-gray-500">
+                  {simRecruits} x {fmt(simRecruitCapital)} ={" "}
+                  {fmt(simTotalIntroCapital)} total introduced
+                </p>
+              </div>
+
+              {/* Intro tier pills */}
+              <div className="flex gap-2">
+                {INV_INTRO_TIERS.map((t, i) => {
+                  const active = i === simIntroTierIdx;
+                  return (
+                    <span
+                      key={t.name}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs",
+                        active
+                          ? "border border-purple-600 bg-purple-50 font-medium text-purple-600"
+                          : "border border-gray-200 text-gray-500"
+                      )}
+                    >
+                      {t.name} &middot; {t.rate}%
+                    </span>
+                  );
+                })}
+              </div>
+
+              {simNextIntroTier ? (
+                <p className="flex items-center gap-1 text-xs text-gray-500">
+                  <span className="font-mono font-medium text-gray-600">
+                    {fmt(simIntroTierRemaining)}
+                  </span>
+                  <span>more to reach</span>
+                  <span>
+                    {simNextIntroTier.name} ({simNextIntroTier.rate}%)
+                  </span>
+                </p>
+              ) : (
+                <p className="text-xs font-medium text-purple-600">
+                  Max tier reached
+                </p>
+              )}
+            </>
+          )}
         </div>
-      )}
+      </div>
 
       {/* ── Comparison chart ─────────────────────────────────── */}
       <div className="rounded-2xl bg-white p-6 space-y-5 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">

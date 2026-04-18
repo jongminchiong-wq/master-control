@@ -552,14 +552,16 @@ function EntityPageContent() {
   return (
     <div className="space-y-5">
       {/* Header + Month Picker */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-medium text-gray-800">Entity</h1>
-        <MonthPicker
-          months={availableMonths}
-          value={selectedMonth}
-          onChange={setSelectedMonth}
-          color="brand"
-        />
+      <div>
+        <div className="flex justify-end">
+          <MonthPicker
+            months={availableMonths}
+            value={selectedMonth}
+            onChange={setSelectedMonth}
+            color="brand"
+          />
+        </div>
+        <h1 className="mt-3 text-lg font-medium text-gray-800">Entity</h1>
       </div>
 
       {/* Hero Summary Cards */}

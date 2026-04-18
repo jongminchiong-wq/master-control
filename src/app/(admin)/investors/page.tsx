@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw, Check, X, Banknote, ArrowDownToLine } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { Tables } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,10 @@ import {
   type DeploymentInvestor,
 } from "@/lib/business-logic/deployment";
 import { fmt, getMonth, fmtMonth } from "@/lib/business-logic/formatters";
+import {
+  shouldAutoCompound,
+  daysUntilCompound,
+} from "@/lib/business-logic/compounding";
 import { useSelectedMonth } from "@/lib/hooks/use-selected-month";
 
 // Shared components
@@ -44,6 +48,7 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -56,6 +61,8 @@ import {
 // ── Types ───────────────────────────────────────────────────
 
 type DBInvestor = Tables<"investors">;
+type DBWithdrawal = Tables<"withdrawals">;
+type DBReturnCredit = Tables<"return_credits">;
 type DBPO = Tables<"purchase_orders"> & {
   delivery_orders: Tables<"delivery_orders">[];
 };
@@ -191,6 +198,8 @@ function InvestorsPageContent() {
   // Data state
   const [investors, setInvestors] = useState<DBInvestor[]>([]);
   const [allPOs, setAllPOs] = useState<DBPO[]>([]);
+  const [withdrawals, setWithdrawals] = useState<DBWithdrawal[]>([]);
+  const [returnCredits, setReturnCredits] = useState<DBReturnCredit[]>([]);
   const [loading, setLoading] = useState(true);
 
   // UI state
@@ -202,6 +211,8 @@ function InvestorsPageContent() {
   );
   const [saving, setSaving] = useState(false);
   const [introSectionOpen, setIntroSectionOpen] = useState(false);
+  const [withdrawalsSectionOpen, setWithdrawalsSectionOpen] = useState(false);
+  const [crediting, setCrediting] = useState(false);
 
   // Month selector (URL-driven, shared across admin pages)
   const [selectedMonth, setSelectedMonth] = useSelectedMonth();
@@ -219,7 +230,7 @@ function InvestorsPageContent() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [investorsRes, posRes] = await Promise.all([
+    const [investorsRes, posRes, withdrawalsRes, creditsRes] = await Promise.all([
       supabase
         .from("investors")
         .select("*")
@@ -228,9 +239,18 @@ function InvestorsPageContent() {
         .from("purchase_orders")
         .select("*, delivery_orders(*)")
         .order("po_date", { ascending: true }),
+      supabase
+        .from("withdrawals")
+        .select("*")
+        .order("requested_at", { ascending: false }),
+      supabase
+        .from("return_credits")
+        .select("*"),
     ]);
     if (investorsRes.data) setInvestors(investorsRes.data);
     if (posRes.data) setAllPOs(posRes.data as DBPO[]);
+    if (withdrawalsRes.data) setWithdrawals(withdrawalsRes.data);
+    if (creditsRes.data) setReturnCredits(creditsRes.data);
     setLoading(false);
   }, [supabase]);
 
@@ -313,6 +333,159 @@ function InvestorsPageContent() {
     [introducerData]
   );
 
+  // Pending withdrawals
+  const pendingWithdrawals = useMemo(
+    () => withdrawals.filter((w) => w.status === "pending"),
+    [withdrawals]
+  );
+
+  // Credited PO IDs set (for idempotency check)
+  const creditedPairs = useMemo(() => {
+    const set = new Set<string>();
+    returnCredits.forEach((rc) => set.add(`${rc.investor_id}:${rc.po_id}`));
+    return set;
+  }, [returnCredits]);
+
+  // Total cash balance across all investors
+  const totalCashBalance = useMemo(
+    () => investors.reduce((s, i) => s + (i.cash_balance ?? 0), 0),
+    [investors]
+  );
+
+  // ── Credit returns handler ──────────────────────────────────
+  // Credits investor cash_balance for completed PO cycles that haven't been credited yet
+
+  async function handleCreditReturns() {
+    setCrediting(true);
+
+    // Find POs with commissions_cleared set
+    const clearedPOs = monthPOs.filter((po) => po.commissions_cleared);
+    if (clearedPOs.length === 0) {
+      setCrediting(false);
+      return;
+    }
+
+    // Calculate deployments for this month
+    const dInvestors = investors.map(toDeploymentInvestor);
+    const dPOs = monthPOs.map(toDeploymentPO);
+    const { deployments: monthDeployments } = calcSharedDeployments(dPOs, dInvestors);
+
+    // For each cleared PO, credit each investor via atomic RPC
+    let credited = 0;
+    for (const po of clearedPOs) {
+      const poDeps = monthDeployments.filter(
+        (d) => d.poId === po.id && d.cycleComplete
+      );
+      for (const dep of poDeps) {
+        const key = `${dep.investorId}:${dep.poId}`;
+        if (creditedPairs.has(key)) continue; // already credited
+
+        const { data, error } = await supabase.rpc("credit_investor_return", {
+          p_investor_id: dep.investorId,
+          p_po_id: dep.poId,
+          p_amount: dep.returnAmt,
+          p_deployed: dep.deployed,
+          p_tier_rate: dep.returnRate,
+        });
+
+        const result = data as {
+          success: boolean;
+          error?: string;
+          duplicate?: boolean;
+        } | null;
+        if (error) {
+          console.error("Credit RPC error:", error.message);
+          continue;
+        }
+        if (result?.duplicate) continue; // already credited, skip
+        if (result?.success) credited++;
+      }
+    }
+
+    setCrediting(false);
+    if (credited > 0) fetchData();
+  }
+
+  // ── Compound handler (admin force-compound) ──────────────────
+
+  async function handleCompoundInvestor(investor: DBInvestor) {
+    if ((investor.cash_balance ?? 0) <= 0) return;
+    setSaving(true);
+
+    const { data, error } = await supabase.rpc("reinvest_cash", {
+      p_investor_id: investor.id,
+      p_source: "admin",
+    });
+
+    const result = data as { success: boolean; error?: string } | null;
+    if (error || !result?.success) {
+      console.error("Compound failed:", error?.message || result?.error);
+    }
+
+    setSaving(false);
+    fetchData();
+  }
+
+  // ── Withdrawal approval handlers ────────────────────────────
+
+  async function handleApproveWithdrawal(withdrawal: DBWithdrawal) {
+    setSaving(true);
+
+    // Cash balance was already deducted when the investor submitted the request.
+    // Approve just updates the withdrawal status.
+    await supabase
+      .from("withdrawals")
+      .update({
+        status: "approved" as const,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq("id", withdrawal.id);
+
+    setSaving(false);
+    fetchData();
+  }
+
+  async function handleRejectWithdrawal(withdrawalId: string, notes?: string) {
+    setSaving(true);
+
+    // Restore cash_balance since it was deducted when the request was submitted
+    const withdrawal = withdrawals.find((w) => w.id === withdrawalId);
+    if (withdrawal) {
+      const investor = investors.find((i) => i.id === withdrawal.investor_id);
+      if (investor) {
+        const restoredBalance = (investor.cash_balance ?? 0) + withdrawal.amount;
+        await supabase
+          .from("investors")
+          .update({ cash_balance: restoredBalance })
+          .eq("id", investor.id);
+      }
+    }
+
+    await supabase
+      .from("withdrawals")
+      .update({
+        status: "rejected" as const,
+        reviewed_at: new Date().toISOString(),
+        notes: notes || null,
+      })
+      .eq("id", withdrawalId);
+    setSaving(false);
+    fetchData();
+  }
+
+  async function handleCompleteWithdrawal(withdrawalId: string) {
+    setSaving(true);
+    await supabase
+      .from("withdrawals")
+      .update({
+        status: "completed" as const,
+        processed_at: new Date().toISOString(),
+      })
+      .eq("id", withdrawalId);
+    setSaving(false);
+    fetchData();
+  }
+
   // ── CRUD handlers ─────────────────────────────────────────
 
   async function handleAddInvestor() {
@@ -380,23 +553,25 @@ function InvestorsPageContent() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div>
+        <div className="flex justify-end">
+          <MonthPicker
+            months={availableMonths}
+            value={selectedMonth}
+            onChange={setSelectedMonth}
+            color="accent"
+          />
+        </div>
+        <div className="mt-3">
           <h1 className="text-lg font-medium text-gray-800">Investors</h1>
           <p className="text-xs text-gray-500">
             Manage investors, capital deployment, and returns
           </p>
         </div>
-        <MonthPicker
-          months={availableMonths}
-          value={selectedMonth}
-          onChange={setSelectedMonth}
-          color="accent"
-        />
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-6 gap-3">
+      <div className="grid grid-cols-7 gap-3">
         <MetricCard
           label="Investors"
           value={String(investors.length)}
@@ -418,6 +593,16 @@ function InvestorsPageContent() {
           color={totalIdle > 0 ? "amber" : "default"}
         />
         <MetricCard
+          label="Cash Balance"
+          value={fmt(totalCashBalance)}
+          subtitle={
+            pendingWithdrawals.length > 0
+              ? `${pendingWithdrawals.length} pending withdrawal${pendingWithdrawals.length > 1 ? "s" : ""}`
+              : undefined
+          }
+          color="brand"
+        />
+        <MetricCard
           label="Returns Earned"
           value={fmt(totalReturnsEarned)}
           subtitle={
@@ -433,6 +618,38 @@ function InvestorsPageContent() {
           color="purple"
         />
       </div>
+
+      {/* Credit Returns action bar */}
+      {(() => {
+        const clearedPOs = monthPOs.filter((po) => po.commissions_cleared);
+        const uncreditedCount = clearedPOs.length > 0
+          ? deployments.filter(
+              (d) => d.cycleComplete && !creditedPairs.has(`${d.investorId}:${d.poId}`)
+            ).length
+          : 0;
+        if (uncreditedCount === 0) return null;
+        return (
+          <div className="flex items-center justify-between rounded-xl bg-brand-50 px-5 py-3 ring-1 ring-brand-200">
+            <div>
+              <p className="text-sm font-medium text-brand-800">
+                {uncreditedCount} uncredited return{uncreditedCount > 1 ? "s" : ""} from cleared POs
+              </p>
+              <p className="text-xs text-brand-600">
+                Credit returns to investor cash balances. Auto-compounds in 7 days if not withdrawn.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              className="bg-brand-600 text-white hover:bg-brand-800"
+              onClick={handleCreditReturns}
+              disabled={crediting}
+            >
+              <Banknote className="size-3.5" data-icon="inline-start" />
+              {crediting ? "Crediting..." : "Credit Returns"}
+            </Button>
+          </div>
+        );
+      })()}
 
       {/* Capital utilisation bar */}
       {totalCapital > 0 && (
@@ -516,6 +733,9 @@ function InvestorsPageContent() {
                   Idle
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
+                  Cash Bal
+                </TableHead>
+                <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
                   Returns
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
@@ -548,6 +768,7 @@ function InvestorsPageContent() {
                     introducer={introducer}
                     isExpanded={isExpanded}
                     confirmDeleteId={confirmDeleteId}
+                    saving={saving}
                     onToggleExpand={() =>
                       setExpandedId(isExpanded ? null : investor.id)
                     }
@@ -555,6 +776,7 @@ function InvestorsPageContent() {
                     onRequestDelete={() => setConfirmDeleteId(investor.id)}
                     onConfirmDelete={() => handleDeleteInvestor(investor.id)}
                     onCancelDelete={() => setConfirmDeleteId(null)}
+                    onCompound={() => handleCompoundInvestor(investor)}
                   />
                 );
               })}
@@ -631,6 +853,130 @@ function InvestorsPageContent() {
                 Tier based on total capital introduced. Commission = tier% of
                 actual investor returns from completed cycles only.
               </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Withdrawal Requests section */}
+      {withdrawals.length > 0 && (
+        <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-900/10">
+          <div className="px-5">
+            <SectionHeader
+              title={`Withdrawal Requests (${pendingWithdrawals.length} pending)`}
+              open={withdrawalsSectionOpen}
+              onToggle={() => setWithdrawalsSectionOpen(!withdrawalsSectionOpen)}
+              badge={{
+                label: pendingWithdrawals.length > 0
+                  ? `${pendingWithdrawals.length} pending`
+                  : "None pending",
+                color: pendingWithdrawals.length > 0 ? "amber" : "success",
+              }}
+            />
+          </div>
+          {withdrawalsSectionOpen && (
+            <div className="border-t border-gray-200 px-5 pb-5 pt-3">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
+                      Investor
+                    </TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
+                      Amount
+                    </TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
+                      Type
+                    </TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
+                      Requested
+                    </TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
+                      Status
+                    </TableHead>
+                    <TableHead className="w-40" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {withdrawals.map((w) => {
+                    const inv = investors.find((i) => i.id === w.investor_id);
+                    const statusColors: Record<string, { bg: string; text: string }> = {
+                      pending: { bg: "bg-amber-50", text: "text-amber-600" },
+                      approved: { bg: "bg-accent-50", text: "text-accent-600" },
+                      rejected: { bg: "bg-danger-50", text: "text-danger-600" },
+                      completed: { bg: "bg-success-50", text: "text-success-600" },
+                    };
+                    const sc = statusColors[w.status] ?? statusColors.pending;
+                    return (
+                      <TableRow key={w.id}>
+                        <TableCell className="text-xs font-medium text-gray-800">
+                          {inv?.name ?? "Unknown"}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs font-medium text-brand-600">
+                          {fmt(w.amount)}
+                        </TableCell>
+                        <TableCell className="text-xs capitalize text-gray-500">
+                          {w.type}
+                        </TableCell>
+                        <TableCell className="text-xs text-gray-500">
+                          {w.requested_at
+                            ? new Date(w.requested_at).toLocaleDateString()
+                            : "--"}
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-medium capitalize",
+                              sc.bg,
+                              sc.text
+                            )}
+                          >
+                            {w.status}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center justify-end gap-1">
+                            {w.status === "pending" && (
+                              <>
+                                <Button
+                                  size="xs"
+                                  className="bg-success-600 text-white hover:bg-success-800"
+                                  onClick={() => handleApproveWithdrawal(w)}
+                                  disabled={saving}
+                                >
+                                  <Check className="size-3" />
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  className="text-danger-600 hover:bg-danger-50"
+                                  onClick={() => handleRejectWithdrawal(w.id)}
+                                  disabled={saving}
+                                >
+                                  <X className="size-3" />
+                                  Reject
+                                </Button>
+                              </>
+                            )}
+                            {w.status === "approved" && (
+                              <Button
+                                size="xs"
+                                className="bg-brand-600 text-white hover:bg-brand-800"
+                                onClick={() => handleCompleteWithdrawal(w.id)}
+                                disabled={saving}
+                              >
+                                <ArrowDownToLine className="size-3" />
+                                Mark Paid
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           )}
         </div>
@@ -832,11 +1178,13 @@ function InvestorRow({
   introducer,
   isExpanded,
   confirmDeleteId,
+  saving,
   onToggleExpand,
   onEdit,
   onRequestDelete,
   onConfirmDelete,
   onCancelDelete,
+  onCompound,
 }: {
   investor: DBInvestor;
   stats: InvestorStats | undefined;
@@ -844,11 +1192,13 @@ function InvestorRow({
   introducer: DBInvestor | undefined;
   isExpanded: boolean;
   confirmDeleteId: string | null;
+  saving: boolean;
   onToggleExpand: () => void;
   onEdit: () => void;
   onRequestDelete: () => void;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
+  onCompound: () => void;
 }) {
   return (
     <>
@@ -888,6 +1238,29 @@ function InvestorRow({
           )}
         >
           {fmt(stats?.idle ?? 0)}
+        </TableCell>
+        <TableCell>
+          {(investor.cash_balance ?? 0) > 0 ? (
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-xs font-medium text-brand-600">
+                {fmt(investor.cash_balance ?? 0)}
+              </span>
+              <button
+                type="button"
+                title="Compound now"
+                className="rounded p-0.5 text-brand-400 transition-colors hover:bg-brand-50 hover:text-brand-600"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCompound();
+                }}
+                disabled={saving}
+              >
+                <RefreshCw className="size-3" />
+              </button>
+            </div>
+          ) : (
+            <span className="font-mono text-xs text-gray-400">--</span>
+          )}
         </TableCell>
         <TableCell className="font-mono text-sm font-medium text-accent-600">
           {(stats?.totalReturns ?? 0) > 0
@@ -948,7 +1321,7 @@ function InvestorRow({
       {/* Expanded detail */}
       {isExpanded && stats && (
         <TableRow className="bg-accent-50/20 hover:bg-accent-50/20">
-          <TableCell colSpan={12} className="p-0">
+          <TableCell colSpan={13} className="p-0">
             <div className="space-y-4 p-5">
               {/* Tier progress */}
               <div className="max-w-xs">
@@ -1066,7 +1439,7 @@ function InvestorRow({
               </div>
 
               {/* Returns summary */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-4 gap-3">
                 <div className="rounded-lg border border-success-100 bg-success-50/30 px-4 py-3">
                   <p className="text-[10px] font-medium uppercase tracking-wider text-success-600">
                     Earned (Completed)
@@ -1099,6 +1472,36 @@ function InvestorRow({
                   <p className="mt-0.5 text-[10px] text-gray-500">
                     at {tier.rate}% per cycle
                   </p>
+                </div>
+                {/* Cash Balance card */}
+                <div className="rounded-lg border border-brand-100 bg-brand-50/30 px-4 py-3">
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-brand-600">
+                    Cash Balance
+                  </p>
+                  <p className="mt-1 font-mono text-base font-medium text-brand-600">
+                    {fmt(investor.cash_balance ?? 0)}
+                  </p>
+                  {(investor.cash_balance ?? 0) > 0 && (
+                    <>
+                      <p className="mt-0.5 text-[10px] text-gray-500">
+                        {investor.compound_at
+                          ? `Compounds in ${daysUntilCompound(investor.compound_at) ?? 0} day(s)`
+                          : "Ready to compound"}
+                      </p>
+                      <Button
+                        size="xs"
+                        className="mt-2 bg-brand-600 text-white hover:bg-brand-800"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onCompound();
+                        }}
+                        disabled={saving}
+                      >
+                        <RefreshCw className="size-3" />
+                        Compound Now
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

@@ -4,9 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export function UserBadge() {
-  const [profile, setProfile] = useState<{ name: string; email: string } | null>(
-    null
-  );
+  const [profile, setProfile] = useState<{ name: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -20,15 +18,12 @@ export function UserBadge() {
 
       const { data: row } = await supabase
         .from("users")
-        .select("name, email")
+        .select("name")
         .eq("id", user.id)
         .single();
 
       if (cancelled) return;
-      setProfile({
-        name: row?.name ?? "",
-        email: row?.email ?? user.email ?? "",
-      });
+      setProfile({ name: row?.name ?? "" });
     }
 
     load();
@@ -37,16 +32,13 @@ export function UserBadge() {
     };
   }, []);
 
-  if (!profile) return null;
+  if (!profile?.name) return null;
 
   return (
     <div className="min-w-0">
-      {profile.name && (
-        <p className="truncate text-sm font-medium text-gray-800">
-          {profile.name}
-        </p>
-      )}
-      <p className="truncate text-xs text-gray-500">{profile.email}</p>
+      <p className="truncate text-sm font-medium text-gray-800">
+        {profile.name}
+      </p>
     </div>
   );
 }

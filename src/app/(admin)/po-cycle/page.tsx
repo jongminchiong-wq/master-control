@@ -505,19 +505,21 @@ function POCyclePageContent() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div>
+        <div className="flex justify-end">
+          <MonthPicker
+            months={availableMonths}
+            value={selectedMonth}
+            onChange={setSelectedMonth}
+            color="brand"
+          />
+        </div>
+        <div className="mt-3">
           <h1 className="text-lg font-medium text-gray-800">PO Cycle</h1>
           <p className="text-xs text-gray-500">
             {totalPOs} POs &middot; {fmt(totalValue)} total value
           </p>
         </div>
-        <MonthPicker
-          months={availableMonths}
-          value={selectedMonth}
-          onChange={setSelectedMonth}
-          color="brand"
-        />
       </div>
 
       {/* Pipeline stage cards */}
