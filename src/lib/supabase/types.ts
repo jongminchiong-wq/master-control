@@ -399,9 +399,113 @@ export interface Database {
         }
         Relationships: []
       }
+      deposits: {
+        Row: {
+          id: string
+          investor_id: string
+          amount: number
+          method: string | null
+          reference: string | null
+          notes: string | null
+          deposited_at: string
+          recorded_by: string | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          investor_id: string
+          amount: number
+          method?: string | null
+          reference?: string | null
+          notes?: string | null
+          deposited_at: string
+          recorded_by?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          investor_id?: string
+          amount?: number
+          method?: string | null
+          reference?: string | null
+          notes?: string | null
+          deposited_at?: string
+          recorded_by?: string | null
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deposits_investor_id_fkey"
+            columns: ["investor_id"]
+            isOneToOne: false
+            referencedRelation: "investors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deposits_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      admin_adjustments: {
+        Row: {
+          id: string
+          investor_id: string
+          amount: number
+          reason: string | null
+          adjusted_by: string | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          investor_id: string
+          amount: number
+          reason?: string | null
+          adjusted_by?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          investor_id?: string
+          amount?: number
+          reason?: string | null
+          adjusted_by?: string | null
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "admin_adjustments_investor_id_fkey"
+            columns: ["investor_id"]
+            isOneToOne: false
+            referencedRelation: "investors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "admin_adjustments_adjusted_by_fkey"
+            columns: ["adjusted_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
-      [_ in never]: never
+      v_investor_ledger: {
+        Row: {
+          investor_id: string | null
+          at: string | null
+          kind: LedgerKind | null
+          amount: number | null
+          ref: string | null
+          notes: string | null
+          balance_after: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       submit_withdrawal: {
@@ -430,6 +534,25 @@ export interface Database {
         }
         Returns: Json
       }
+      record_deposit: {
+        Args: {
+          p_investor_id: string
+          p_amount: number
+          p_deposited_at: string
+          p_method?: string
+          p_reference?: string
+          p_notes?: string
+        }
+        Returns: Json
+      }
+      adjust_capital: {
+        Args: {
+          p_investor_id: string
+          p_new_capital: number
+          p_reason?: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never
@@ -437,7 +560,10 @@ export interface Database {
   }
 }
 
+export type LedgerKind = 'deposit' | 'withdrawal' | 'return_credit' | 'compound' | 'admin_adjustment'
+
 // Convenience type aliases
 export type Tables<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Row']
 export type InsertDto<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Insert']
 export type UpdateDto<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Update']
+export type LedgerRow = Database['public']['Views']['v_investor_ledger']['Row']

@@ -165,6 +165,7 @@ function PlayersPageContent() {
   // UI state
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [editingPlayer, setEditingPlayer] = useState<DBPlayer | null>(null);
   const [saving, setSaving] = useState(false);
@@ -337,8 +338,14 @@ function PlayersPageContent() {
   async function handleDeletePlayer(id: string) {
     await supabase.from("players").delete().eq("id", id);
     setConfirmDeleteId(null);
+    setDeleteConfirmText("");
     if (expandedId === id) setExpandedId(null);
     fetchData();
+  }
+
+  function openDeleteDialog(player: DBPlayer) {
+    setDeleteConfirmText("");
+    setConfirmDeleteId(player.id);
   }
 
   async function handleQuickTierUpdate(
@@ -505,7 +512,6 @@ function PlayersPageContent() {
                     totalComm={totalComm}
                     introducer={introducer}
                     isExpanded={isExpanded}
-                    confirmDeleteId={confirmDeleteId}
                     players={players}
                     monthPOs={monthPOs}
                     wPlayers={wPlayers}
@@ -514,9 +520,7 @@ function PlayersPageContent() {
                       setExpandedId(isExpanded ? null : player.id)
                     }
                     onEdit={() => openEditDialog(player)}
-                    onRequestDelete={() => setConfirmDeleteId(player.id)}
-                    onConfirmDelete={() => handleDeletePlayer(player.id)}
-                    onCancelDelete={() => setConfirmDeleteId(null)}
+                    onRequestDelete={() => openDeleteDialog(player)}
                     onQuickTierUpdate={handleQuickTierUpdate}
                   />
                 );
@@ -556,6 +560,27 @@ function PlayersPageContent() {
         saving={saving}
         onSubmit={handleEditPlayer}
         submitLabel="Save Changes"
+      />
+
+      <DeletePlayerDialog
+        open={confirmDeleteId !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfirmDeleteId(null);
+            setDeleteConfirmText("");
+          }
+        }}
+        player={
+          confirmDeleteId
+            ? (players.find((p) => p.id === confirmDeleteId) ?? null)
+            : null
+        }
+        confirmText={deleteConfirmText}
+        setConfirmText={setDeleteConfirmText}
+        saving={saving}
+        onConfirm={() => {
+          if (confirmDeleteId) handleDeletePlayer(confirmDeleteId);
+        }}
       />
     </div>
   );
@@ -737,7 +762,6 @@ function PlayerRow({
   totalComm,
   introducer,
   isExpanded,
-  confirmDeleteId,
   players,
   monthPOs,
   wPlayers,
@@ -745,8 +769,6 @@ function PlayerRow({
   onToggleExpand,
   onEdit,
   onRequestDelete,
-  onConfirmDelete,
-  onCancelDelete,
   onQuickTierUpdate,
 }: {
   player: DBPlayer;
@@ -766,7 +788,6 @@ function PlayerRow({
   totalComm: number;
   introducer: DBPlayer | undefined;
   isExpanded: boolean;
-  confirmDeleteId: string | null;
   players: DBPlayer[];
   monthPOs: DBPO[];
   wPlayers: WaterfallPlayer[];
@@ -774,8 +795,6 @@ function PlayerRow({
   onToggleExpand: () => void;
   onEdit: () => void;
   onRequestDelete: () => void;
-  onConfirmDelete: () => void;
-  onCancelDelete: () => void;
   onQuickTierUpdate: (
     id: string,
     field: "eu_tier_mode" | "intro_tier_mode",
@@ -847,33 +866,14 @@ function PlayerRow({
             >
               <Pencil className="size-3 text-gray-400" />
             </Button>
-            {confirmDeleteId === player.id ? (
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="destructive"
-                  size="xs"
-                  onClick={onConfirmDelete}
-                >
-                  Delete
-                </Button>
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={onCancelDelete}
-                >
-                  Cancel
-                </Button>
-              </div>
-            ) : (
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={onRequestDelete}
-                title="Delete player"
-              >
-                <Trash2 className="size-3 text-danger-400" />
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={onRequestDelete}
+              title="Delete player"
+            >
+              <Trash2 className="size-3 text-danger-400" />
+            </Button>
           </div>
         </TableCell>
       </TableRow>
@@ -1145,5 +1145,73 @@ function IntroducerEarnings({
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+// ── Delete Player Dialog ─────────────────────────────────────
+
+function DeletePlayerDialog({
+  open,
+  onOpenChange,
+  player,
+  confirmText,
+  setConfirmText,
+  saving,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  player: DBPlayer | null;
+  confirmText: string;
+  setConfirmText: (v: string) => void;
+  saving: boolean;
+  onConfirm: () => void;
+}) {
+  const canDelete =
+    player !== null && confirmText.trim() === player.name && !saving;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete player</DialogTitle>
+          <DialogDescription>
+            This permanently removes{" "}
+            <span className="font-semibold text-gray-800">
+              {player?.name ?? ""}
+            </span>{" "}
+            and cascades to their purchase orders and delivery orders. There
+            is no undo.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-gray-500">
+            Type{" "}
+            <span className="font-mono font-semibold text-gray-800">
+              {player?.name ?? ""}
+            </span>{" "}
+            to confirm
+          </label>
+          <Input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder={player?.name ?? ""}
+            autoFocus
+          />
+        </div>
+
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+          <Button
+            variant="destructive"
+            onClick={onConfirm}
+            disabled={!canDelete}
+          >
+            {saving ? "Deleting..." : "Delete permanently"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,9 +1,9 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw, Check, X, Banknote, ArrowDownToLine } from "lucide-react";
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw, Check, X, Banknote, ArrowDownToLine, ArrowDownCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import type { Tables } from "@/lib/supabase/types";
+import type { Tables, LedgerRow } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 // Business logic
@@ -200,13 +200,18 @@ function InvestorsPageContent() {
   const [allPOs, setAllPOs] = useState<DBPO[]>([]);
   const [withdrawals, setWithdrawals] = useState<DBWithdrawal[]>([]);
   const [returnCredits, setReturnCredits] = useState<DBReturnCredit[]>([]);
+  const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   // UI state
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [editingInvestor, setEditingInvestor] = useState<DBInvestor | null>(
+    null
+  );
+  const [depositInvestor, setDepositInvestor] = useState<DBInvestor | null>(
     null
   );
   const [saving, setSaving] = useState(false);
@@ -223,34 +228,49 @@ function InvestorsPageContent() {
     capital: "",
     date_joined: "",
     introduced_by: "",
+    reason: "",
   };
   const [form, setForm] = useState(emptyForm);
+
+  // Deposit dialog form state
+  const emptyDepositForm = {
+    amount: "",
+    deposited_at: new Date().toISOString().slice(0, 10),
+    method: "bank_transfer",
+    reference: "",
+    notes: "",
+  };
+  const [depositForm, setDepositForm] = useState(emptyDepositForm);
 
   // ── Data fetching ───────────────────────────────────────
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [investorsRes, posRes, withdrawalsRes, creditsRes] = await Promise.all([
-      supabase
-        .from("investors")
-        .select("*")
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("purchase_orders")
-        .select("*, delivery_orders(*)")
-        .order("po_date", { ascending: true }),
-      supabase
-        .from("withdrawals")
-        .select("*")
-        .order("requested_at", { ascending: false }),
-      supabase
-        .from("return_credits")
-        .select("*"),
-    ]);
+    const [investorsRes, posRes, withdrawalsRes, creditsRes, ledgerRes] =
+      await Promise.all([
+        supabase
+          .from("investors")
+          .select("*")
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("purchase_orders")
+          .select("*, delivery_orders(*)")
+          .order("po_date", { ascending: true }),
+        supabase
+          .from("withdrawals")
+          .select("*")
+          .order("requested_at", { ascending: false }),
+        supabase.from("return_credits").select("*"),
+        supabase
+          .from("v_investor_ledger")
+          .select("*")
+          .order("at", { ascending: false }),
+      ]);
     if (investorsRes.data) setInvestors(investorsRes.data);
     if (posRes.data) setAllPOs(posRes.data as DBPO[]);
     if (withdrawalsRes.data) setWithdrawals(withdrawalsRes.data);
     if (creditsRes.data) setReturnCredits(creditsRes.data);
+    if (ledgerRes.data) setLedgerRows(ledgerRes.data);
     setLoading(false);
   }, [supabase]);
 
@@ -351,6 +371,18 @@ function InvestorsPageContent() {
     () => investors.reduce((s, i) => s + (i.cash_balance ?? 0), 0),
     [investors]
   );
+
+  // Ledger grouped by investor, newest first
+  const ledgerByInvestor = useMemo(() => {
+    const map = new Map<string, LedgerRow[]>();
+    for (const row of ledgerRows) {
+      if (!row.investor_id) continue;
+      const list = map.get(row.investor_id) ?? [];
+      list.push(row);
+      map.set(row.investor_id, list);
+    }
+    return map;
+  }, [ledgerRows]);
 
   // ── Credit returns handler ──────────────────────────────────
   // Credits investor cash_balance for completed PO cycles that haven't been credited yet
@@ -491,12 +523,43 @@ function InvestorsPageContent() {
   async function handleAddInvestor() {
     if (!form.name.trim() || !form.capital || !form.date_joined) return;
     setSaving(true);
-    await supabase.from("investors").insert({
-      name: form.name.trim(),
-      capital: parseFloat(form.capital) || 0,
-      date_joined: form.date_joined,
-      introduced_by: form.introduced_by || null,
-    });
+    const initialCapital = parseFloat(form.capital) || 0;
+
+    // Insert investor with capital=0 so the ledger is populated via record_deposit.
+    const { data: insertRes, error: insertErr } = await supabase
+      .from("investors")
+      .insert({
+        name: form.name.trim(),
+        capital: 0,
+        date_joined: form.date_joined,
+        introduced_by: form.introduced_by || null,
+      })
+      .select("id")
+      .single();
+
+    if (insertErr || !insertRes) {
+      console.error("Add investor failed:", insertErr?.message);
+      setSaving(false);
+      return;
+    }
+
+    if (initialCapital > 0) {
+      const { data, error } = await supabase.rpc("record_deposit", {
+        p_investor_id: insertRes.id,
+        p_amount: initialCapital,
+        p_deposited_at: form.date_joined,
+        p_method: "initial",
+        p_notes: "Initial capital on investor creation",
+      });
+      const result = data as { success: boolean; error?: string } | null;
+      if (error || !result?.success) {
+        console.error(
+          "Initial deposit failed:",
+          error?.message || result?.error
+        );
+      }
+    }
+
     setForm(emptyForm);
     setShowAddDialog(false);
     setSaving(false);
@@ -506,15 +569,38 @@ function InvestorsPageContent() {
   async function handleEditInvestor() {
     if (!editingInvestor || !form.name.trim() || !form.capital) return;
     setSaving(true);
-    await supabase
+
+    // Non-capital fields update directly on the row.
+    const { error: updateErr } = await supabase
       .from("investors")
       .update({
         name: form.name.trim(),
-        capital: parseFloat(form.capital) || 0,
         date_joined: form.date_joined || null,
         introduced_by: form.introduced_by || null,
       })
       .eq("id", editingInvestor.id);
+
+    if (updateErr) {
+      console.error("Edit investor failed:", updateErr.message);
+    }
+
+    // Capital changes go through adjust_capital so the ledger stays complete.
+    const newCapital = parseFloat(form.capital) || 0;
+    if (newCapital !== editingInvestor.capital) {
+      const { data, error } = await supabase.rpc("adjust_capital", {
+        p_investor_id: editingInvestor.id,
+        p_new_capital: newCapital,
+        p_reason: form.reason.trim() || "Admin capital edit",
+      });
+      const result = data as { success: boolean; error?: string } | null;
+      if (error || !result?.success) {
+        console.error(
+          "Adjust capital failed:",
+          error?.message || result?.error
+        );
+      }
+    }
+
     setEditingInvestor(null);
     setForm(emptyForm);
     setSaving(false);
@@ -524,8 +610,14 @@ function InvestorsPageContent() {
   async function handleDeleteInvestor(id: string) {
     await supabase.from("investors").delete().eq("id", id);
     setConfirmDeleteId(null);
+    setDeleteConfirmText("");
     if (expandedId === id) setExpandedId(null);
     fetchData();
+  }
+
+  function openDeleteDialog(investor: DBInvestor) {
+    setDeleteConfirmText("");
+    setConfirmDeleteId(investor.id);
   }
 
   function openEditDialog(investor: DBInvestor) {
@@ -534,8 +626,41 @@ function InvestorsPageContent() {
       capital: String(investor.capital),
       date_joined: investor.date_joined ?? "",
       introduced_by: investor.introduced_by ?? "",
+      reason: "",
     });
     setEditingInvestor(investor);
+  }
+
+  // ── Deposit handler ─────────────────────────────────────────
+
+  function openDepositDialog(investor: DBInvestor) {
+    setDepositForm(emptyDepositForm);
+    setDepositInvestor(investor);
+  }
+
+  async function handleRecordDeposit() {
+    if (!depositInvestor) return;
+    const amount = parseFloat(depositForm.amount) || 0;
+    if (amount <= 0 || !depositForm.deposited_at) return;
+    setSaving(true);
+
+    const { data, error } = await supabase.rpc("record_deposit", {
+      p_investor_id: depositInvestor.id,
+      p_amount: amount,
+      p_deposited_at: depositForm.deposited_at,
+      p_method: depositForm.method || undefined,
+      p_reference: depositForm.reference || undefined,
+      p_notes: depositForm.notes || undefined,
+    });
+    const result = data as { success: boolean; error?: string } | null;
+    if (error || !result?.success) {
+      console.error("Deposit failed:", error?.message || result?.error);
+    }
+
+    setDepositInvestor(null);
+    setDepositForm(emptyDepositForm);
+    setSaving(false);
+    fetchData();
   }
 
   // ── Loading state ─────────────────────────────────────────
@@ -767,16 +892,15 @@ function InvestorsPageContent() {
                     tier={tier}
                     introducer={introducer}
                     isExpanded={isExpanded}
-                    confirmDeleteId={confirmDeleteId}
                     saving={saving}
+                    ledger={ledgerByInvestor.get(investor.id) ?? []}
                     onToggleExpand={() =>
                       setExpandedId(isExpanded ? null : investor.id)
                     }
                     onEdit={() => openEditDialog(investor)}
-                    onRequestDelete={() => setConfirmDeleteId(investor.id)}
-                    onConfirmDelete={() => handleDeleteInvestor(investor.id)}
-                    onCancelDelete={() => setConfirmDeleteId(null)}
+                    onRequestDelete={() => openDeleteDialog(investor)}
                     onCompound={() => handleCompoundInvestor(investor)}
+                    onRecordDeposit={() => openDepositDialog(investor)}
                   />
                 );
               })}
@@ -995,6 +1119,8 @@ function InvestorsPageContent() {
         saving={saving}
         onSubmit={handleAddInvestor}
         submitLabel="Add Investor"
+        mode="add"
+        originalCapital={null}
       />
 
       {/* Edit Investor Dialog */}
@@ -1004,7 +1130,7 @@ function InvestorsPageContent() {
           if (!open) setEditingInvestor(null);
         }}
         title="Edit Investor"
-        description="Update investor details."
+        description="Update investor details. Capital changes are recorded in the ledger as admin adjustments."
         form={form}
         setForm={setForm}
         investors={investors}
@@ -1012,6 +1138,41 @@ function InvestorsPageContent() {
         saving={saving}
         onSubmit={handleEditInvestor}
         submitLabel="Save Changes"
+        mode="edit"
+        originalCapital={editingInvestor?.capital ?? null}
+      />
+
+      <DepositDialog
+        open={depositInvestor !== null}
+        onOpenChange={(open) => {
+          if (!open) setDepositInvestor(null);
+        }}
+        investor={depositInvestor}
+        form={depositForm}
+        setForm={setDepositForm}
+        saving={saving}
+        onSubmit={handleRecordDeposit}
+      />
+
+      <DeleteInvestorDialog
+        open={confirmDeleteId !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfirmDeleteId(null);
+            setDeleteConfirmText("");
+          }
+        }}
+        investor={
+          confirmDeleteId
+            ? (investors.find((i) => i.id === confirmDeleteId) ?? null)
+            : null
+        }
+        confirmText={deleteConfirmText}
+        setConfirmText={setDeleteConfirmText}
+        saving={saving}
+        onConfirm={() => {
+          if (confirmDeleteId) handleDeleteInvestor(confirmDeleteId);
+        }}
       />
     </div>
   );
@@ -1024,6 +1185,7 @@ interface InvestorFormState {
   capital: string;
   date_joined: string;
   introduced_by: string;
+  reason: string;
 }
 
 function InvestorFormDialog({
@@ -1038,6 +1200,8 @@ function InvestorFormDialog({
   saving,
   onSubmit,
   submitLabel,
+  mode,
+  originalCapital,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -1052,9 +1216,15 @@ function InvestorFormDialog({
   saving: boolean;
   onSubmit: () => void;
   submitLabel: string;
+  mode: "add" | "edit";
+  originalCapital: number | null;
 }) {
   const capitalNum = parseFloat(form.capital) || 0;
   const previewTier = getTier(capitalNum, INV_TIERS);
+  const capitalChanged =
+    mode === "edit" &&
+    originalCapital !== null &&
+    capitalNum !== originalCapital;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1097,7 +1267,30 @@ function InvestorFormDialog({
                 {previewTier.name} tier ({previewTier.rate}%)
               </p>
             )}
+            {mode === "edit" && originalCapital !== null && capitalChanged && (
+              <p className="mt-1 text-xs text-amber-600">
+                Changing from {fmt(originalCapital)} to {fmt(capitalNum)}.
+                Difference ({fmt(capitalNum - originalCapital)}) will be
+                recorded as an admin adjustment in the ledger.
+              </p>
+            )}
           </div>
+
+          {/* Reason — only shown when editing and capital has changed */}
+          {mode === "edit" && capitalChanged && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">
+                Reason for adjustment (optional)
+              </label>
+              <Input
+                value={form.reason}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, reason: e.target.value }))
+                }
+                placeholder="e.g. Correcting typo from intake"
+              />
+            </div>
+          )}
 
           {/* Date joined */}
           <div>
@@ -1177,28 +1370,26 @@ function InvestorRow({
   tier,
   introducer,
   isExpanded,
-  confirmDeleteId,
   saving,
+  ledger,
   onToggleExpand,
   onEdit,
   onRequestDelete,
-  onConfirmDelete,
-  onCancelDelete,
   onCompound,
+  onRecordDeposit,
 }: {
   investor: DBInvestor;
   stats: InvestorStats | undefined;
   tier: { name: string; rate: number; min: number; max: number };
   introducer: DBInvestor | undefined;
   isExpanded: boolean;
-  confirmDeleteId: string | null;
   saving: boolean;
+  ledger: LedgerRow[];
   onToggleExpand: () => void;
   onEdit: () => void;
   onRequestDelete: () => void;
-  onConfirmDelete: () => void;
-  onCancelDelete: () => void;
   onCompound: () => void;
+  onRecordDeposit: () => void;
 }) {
   return (
     <>
@@ -1291,29 +1482,14 @@ function InvestorRow({
             >
               <Pencil className="size-3 text-gray-400" />
             </Button>
-            {confirmDeleteId === investor.id ? (
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="destructive"
-                  size="xs"
-                  onClick={onConfirmDelete}
-                >
-                  Delete
-                </Button>
-                <Button variant="outline" size="xs" onClick={onCancelDelete}>
-                  Cancel
-                </Button>
-              </div>
-            ) : (
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={onRequestDelete}
-                title="Delete investor"
-              >
-                <Trash2 className="size-3 text-danger-400" />
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={onRequestDelete}
+              title="Delete investor"
+            >
+              <Trash2 className="size-3 text-danger-400" />
+            </Button>
           </div>
         </TableCell>
       </TableRow>
@@ -1504,10 +1680,334 @@ function InvestorRow({
                   )}
                 </div>
               </div>
+
+              {/* Capital history ledger */}
+              <div className="rounded-lg border border-gray-200 bg-white p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                    Capital History
+                  </p>
+                  <Button
+                    size="xs"
+                    className="bg-accent-600 text-white hover:bg-accent-800"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRecordDeposit();
+                    }}
+                    disabled={saving}
+                  >
+                    <ArrowDownCircle className="size-3" />
+                    Record Deposit
+                  </Button>
+                </div>
+                {ledger.length === 0 ? (
+                  <p className="py-4 text-center text-xs text-gray-500">
+                    No capital movements yet.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-[9px] uppercase tracking-wider text-gray-500">
+                          Date
+                        </TableHead>
+                        <TableHead className="text-[9px] uppercase tracking-wider text-gray-500">
+                          Type
+                        </TableHead>
+                        <TableHead className="text-[9px] uppercase tracking-wider text-gray-500">
+                          Amount
+                        </TableHead>
+                        <TableHead className="text-[9px] uppercase tracking-wider text-gray-500">
+                          Balance
+                        </TableHead>
+                        <TableHead className="text-[9px] uppercase tracking-wider text-gray-500">
+                          Notes
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {ledger.map((row, i) => (
+                        <LedgerTableRow key={`${row.ref}-${i}`} row={row} />
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
             </div>
           </TableCell>
         </TableRow>
       )}
     </>
+  );
+}
+
+// ── Ledger row ───────────────────────────────────────────────
+
+function LedgerTableRow({ row }: { row: LedgerRow }) {
+  const amount = row.amount ?? 0;
+  const kindLabel: Record<string, string> = {
+    deposit: "Deposit",
+    withdrawal: "Withdrawal",
+    return_credit: "Return",
+    compound: "Compound",
+    admin_adjustment: "Admin Adjustment",
+  };
+  const kindColor: Record<string, string> = {
+    deposit: "text-success-600",
+    withdrawal: "text-danger-600",
+    return_credit: "text-accent-600",
+    compound: "text-gray-500",
+    admin_adjustment: "text-amber-600",
+  };
+  const kind = row.kind ?? "";
+  const amountColor =
+    amount > 0
+      ? "text-success-600"
+      : amount < 0
+        ? "text-danger-600"
+        : "text-gray-400";
+  const dateStr = row.at
+    ? new Date(row.at).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+      })
+    : "--";
+  return (
+    <TableRow>
+      <TableCell className="text-xs text-gray-600">{dateStr}</TableCell>
+      <TableCell
+        className={cn(
+          "text-xs font-medium",
+          kindColor[kind] ?? "text-gray-500"
+        )}
+      >
+        {kindLabel[kind] ?? kind}
+      </TableCell>
+      <TableCell
+        className={cn("font-mono text-xs font-medium", amountColor)}
+      >
+        {amount === 0 ? "--" : (amount > 0 ? "+" : "") + fmt(amount)}
+      </TableCell>
+      <TableCell className="font-mono text-xs">
+        {row.balance_after !== null ? fmt(row.balance_after) : "--"}
+      </TableCell>
+      <TableCell className="text-xs text-gray-500">
+        {row.notes ?? "--"}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+// ── Deposit Dialog ───────────────────────────────────────────
+
+interface DepositFormState {
+  amount: string;
+  deposited_at: string;
+  method: string;
+  reference: string;
+  notes: string;
+}
+
+function DepositDialog({
+  open,
+  onOpenChange,
+  investor,
+  form,
+  setForm,
+  saving,
+  onSubmit,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  investor: DBInvestor | null;
+  form: DepositFormState;
+  setForm: (
+    f: DepositFormState | ((prev: DepositFormState) => DepositFormState)
+  ) => void;
+  saving: boolean;
+  onSubmit: () => void;
+}) {
+  const amountNum = parseFloat(form.amount) || 0;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Record Deposit</DialogTitle>
+          <DialogDescription>
+            {investor
+              ? `Log money received from ${investor.name}. Capital will increase by the amount entered.`
+              : ""}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Amount */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">
+              Amount (RM)
+            </label>
+            <Input
+              type="number"
+              value={form.amount}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, amount: e.target.value }))
+              }
+              placeholder="e.g. 10000"
+            />
+            {investor && amountNum > 0 && (
+              <p className="mt-1 text-xs text-accent-600">
+                Capital will become {fmt(investor.capital + amountNum)}
+              </p>
+            )}
+          </div>
+
+          {/* Date received */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">
+              Date received
+            </label>
+            <Input
+              type="date"
+              value={form.deposited_at}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, deposited_at: e.target.value }))
+              }
+            />
+          </div>
+
+          {/* Method */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">
+              Method
+            </label>
+            <Select
+              value={form.method || "bank_transfer"}
+              onValueChange={(v) =>
+                setForm((prev) => ({ ...prev, method: v ?? "bank_transfer" }))
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bank_transfer">Bank transfer</SelectItem>
+                <SelectItem value="cheque">Cheque</SelectItem>
+                <SelectItem value="cash">Cash</SelectItem>
+                <SelectItem value="other">Other</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Reference */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">
+              Reference (optional)
+            </label>
+            <Input
+              value={form.reference}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, reference: e.target.value }))
+              }
+              placeholder="Bank ref, cheque no., etc."
+            />
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">
+              Notes (optional)
+            </label>
+            <Input
+              value={form.notes}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, notes: e.target.value }))
+              }
+              placeholder="e.g. Top-up for January cycle"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+          <Button
+            className="bg-accent-600 text-white hover:bg-accent-800"
+            onClick={onSubmit}
+            disabled={saving || amountNum <= 0 || !form.deposited_at}
+          >
+            {saving ? "Saving..." : "Record Deposit"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Delete Investor Dialog ────────────────────────────────────
+
+function DeleteInvestorDialog({
+  open,
+  onOpenChange,
+  investor,
+  confirmText,
+  setConfirmText,
+  saving,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  investor: DBInvestor | null;
+  confirmText: string;
+  setConfirmText: (v: string) => void;
+  saving: boolean;
+  onConfirm: () => void;
+}) {
+  const canDelete =
+    investor !== null && confirmText.trim() === investor.name && !saving;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete investor</DialogTitle>
+          <DialogDescription>
+            This permanently removes{" "}
+            <span className="font-semibold text-gray-800">
+              {investor?.name ?? ""}
+            </span>{" "}
+            and cascades to their deposits, admin adjustments, withdrawals,
+            return credits, and compound log. There is no undo.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-gray-500">
+            Type{" "}
+            <span className="font-mono font-semibold text-gray-800">
+              {investor?.name ?? ""}
+            </span>{" "}
+            to confirm
+          </label>
+          <Input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder={investor?.name ?? ""}
+            autoFocus
+          />
+        </div>
+
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+          <Button
+            variant="destructive"
+            onClick={onConfirm}
+            disabled={!canDelete}
+          >
+            {saving ? "Deleting..." : "Delete permanently"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

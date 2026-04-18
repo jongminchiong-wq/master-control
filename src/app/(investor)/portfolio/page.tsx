@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import type { Tables } from "@/lib/supabase/types";
+import type { Tables, LedgerRow } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 // Business logic
@@ -68,6 +68,7 @@ import {
   RefreshCw,
   ArrowDownToLine,
   Clock,
+  History,
 } from "lucide-react";
 
 // ── Types ───────────────────────────────────────────────────
@@ -152,6 +153,10 @@ export default function InvestorDashboardPage() {
   const [returnsOpen, setReturnsOpen] = useState(false);
   const [introOpen, setIntroOpen] = useState(false);
   const [withdrawalsOpen, setWithdrawalsOpen] = useState(false);
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+
+  // Capital history
+  const [myLedger, setMyLedger] = useState<LedgerRow[]>([]);
 
   // Withdrawal dialog state
   const [showWithdrawDialog, setShowWithdrawDialog] = useState(false);
@@ -197,7 +202,7 @@ export default function InvestorDashboardPage() {
 
     setMyInvestor(investorData);
 
-    const [investorsRes, posRes, withdrawalsRes] = await Promise.all([
+    const [investorsRes, posRes, withdrawalsRes, ledgerRes] = await Promise.all([
       supabase
         .from("investors")
         .select("*")
@@ -211,11 +216,17 @@ export default function InvestorDashboardPage() {
         .select("*")
         .eq("investor_id", investorData.id)
         .order("requested_at", { ascending: false }),
+      supabase
+        .from("v_investor_ledger")
+        .select("*")
+        .eq("investor_id", investorData.id)
+        .order("at", { ascending: false }),
     ]);
 
     if (investorsRes.data) setAllInvestors(investorsRes.data);
     if (posRes.data) setAllPOs(posRes.data as DBPO[]);
     if (withdrawalsRes.data) setMyWithdrawals(withdrawalsRes.data);
+    if (ledgerRes.data) setMyLedger(ledgerRes.data);
 
     // Auto-compound on read: if compound window has passed, compound automatically
     if (
@@ -482,7 +493,15 @@ export default function InvestorDashboardPage() {
   return (
     <div className="space-y-5">
       {/* Header + Month Picker */}
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-3">
+        <button
+          type="button"
+          onClick={() => setLedgerOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-200"
+        >
+          <History className="size-3.5" />
+          Capital history
+        </button>
         <MonthPicker
           months={availableMonths}
           value={selectedMonth}
@@ -1040,6 +1059,108 @@ export default function InvestorDashboardPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ═══ SHEET 5: CAPITAL HISTORY ═══ */}
+      <Sheet open={ledgerOpen} onOpenChange={setLedgerOpen}>
+        <SheetContent side="right" className="w-[80vw] sm:max-w-[80vw]">
+          <SheetHeader>
+            <SheetTitle>Capital History</SheetTitle>
+            <SheetDescription>
+              Every deposit, withdrawal, return, compound, and adjustment on
+              your account, newest first.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-6 pb-6">
+            {myLedger.length === 0 ? (
+              <p className="py-12 text-center text-xs text-gray-500">
+                No movements yet.
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-[10px]">Date</TableHead>
+                    <TableHead className="text-[10px]">Type</TableHead>
+                    <TableHead className="text-right text-[10px]">
+                      Amount
+                    </TableHead>
+                    <TableHead className="text-right text-[10px]">
+                      Balance
+                    </TableHead>
+                    <TableHead className="text-[10px]">Notes</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {myLedger.map((row, i) => {
+                    const amount = row.amount ?? 0;
+                    const kindLabel: Record<string, string> = {
+                      deposit: "Deposit",
+                      withdrawal: "Withdrawal",
+                      return_credit: "Return",
+                      compound: "Compound",
+                      admin_adjustment: "Adjustment",
+                    };
+                    const kindColor: Record<string, string> = {
+                      deposit: "text-success-600",
+                      withdrawal: "text-danger-600",
+                      return_credit: "text-accent-600",
+                      compound: "text-gray-500",
+                      admin_adjustment: "text-amber-600",
+                    };
+                    const kind = row.kind ?? "";
+                    const amountColor =
+                      amount > 0
+                        ? "text-success-600"
+                        : amount < 0
+                          ? "text-danger-600"
+                          : "text-gray-400";
+                    const dateStr = row.at
+                      ? new Date(row.at).toLocaleDateString(undefined, {
+                          year: "numeric",
+                          month: "short",
+                          day: "2-digit",
+                        })
+                      : "--";
+                    return (
+                      <TableRow key={`${row.ref}-${i}`}>
+                        <TableCell className="text-xs text-gray-600">
+                          {dateStr}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "text-xs font-medium",
+                            kindColor[kind] ?? "text-gray-500"
+                          )}
+                        >
+                          {kindLabel[kind] ?? kind}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "text-right font-mono text-xs font-medium",
+                            amountColor
+                          )}
+                        >
+                          {amount === 0
+                            ? "--"
+                            : (amount > 0 ? "+" : "") + fmt(amount)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs">
+                          {row.balance_after !== null
+                            ? fmt(row.balance_after)
+                            : "--"}
+                        </TableCell>
+                        <TableCell className="text-xs text-gray-500">
+                          {row.notes ?? "--"}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* ═══ SHEET 4: WITHDRAWAL HISTORY ═══ */}
       <Sheet open={withdrawalsOpen} onOpenChange={setWithdrawalsOpen}>
