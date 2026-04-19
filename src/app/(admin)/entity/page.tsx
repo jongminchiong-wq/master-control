@@ -89,6 +89,7 @@ function toDeploymentPO(po: DBPO): DeploymentPO {
     dos: (po.delivery_orders ?? []).map((d) => ({
       buyerPaid: d.buyer_paid,
     })),
+    commissionsCleared: po.commissions_cleared,
   };
 }
 
@@ -366,12 +367,20 @@ function EntityPageContent() {
     [wAllPOs, selectedMonth]
   );
 
+  // POs whose po_date is on or before the selected month — passed to the
+  // allocator so prior-month deployments that are still locking up capital
+  // are respected when computing this month's allocations.
+  const poolPOs = useMemo(
+    () => allPOs.filter((po) => getMonth(po.po_date) <= selectedMonth),
+    [allPOs, selectedMonth]
+  );
+
   // ── Deployment calculations ──────────────────────────────
 
   const { deployments } = useMemo(() => {
-    const dMonthPOs = monthPOs.map(toDeploymentPO);
-    return calcSharedDeployments(dMonthPOs, dInvestors);
-  }, [monthPOs, dInvestors]);
+    const dPoolPOs = poolPOs.map(toDeploymentPO);
+    return calcSharedDeployments(dPoolPOs, dInvestors, selectedMonth);
+  }, [poolPOs, dInvestors, selectedMonth]);
 
   // ── Investor introducer commissions ──────────────────────
 

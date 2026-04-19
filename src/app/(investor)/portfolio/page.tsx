@@ -90,6 +90,7 @@ function toDeploymentPO(po: DBPO): DeploymentPO {
     dos: (po.delivery_orders ?? []).map((d) => ({
       buyerPaid: d.buyer_paid,
     })),
+    commissionsCleared: po.commissions_cleared,
   };
 }
 
@@ -267,14 +268,17 @@ export default function InvestorDashboardPage() {
 
   // ── Computed: deployments for selected month ──────────────
 
-  const monthPOs = useMemo(
-    () => allPOs.filter((po) => getMonth(po.po_date) === selectedMonth),
+  // POs whose po_date is on or before the selected month — the allocator
+  // walks this pool so prior-month deployments that are still locking
+  // capital are respected when computing end-of-month idle.
+  const poolPOs = useMemo(
+    () => allPOs.filter((po) => getMonth(po.po_date) <= selectedMonth),
     [allPOs, selectedMonth]
   );
 
   const deploymentPOs = useMemo(
-    () => monthPOs.map(toDeploymentPO),
-    [monthPOs]
+    () => poolPOs.map(toDeploymentPO),
+    [poolPOs]
   );
 
   const deploymentInvestors = useMemo(
@@ -282,9 +286,10 @@ export default function InvestorDashboardPage() {
     [allInvestors]
   );
 
-  const { deployments: allDeployments } = useMemo(
-    () => calcSharedDeployments(deploymentPOs, deploymentInvestors),
-    [deploymentPOs, deploymentInvestors]
+  const { deployments: allDeployments, remaining } = useMemo(
+    () =>
+      calcSharedDeployments(deploymentPOs, deploymentInvestors, selectedMonth),
+    [deploymentPOs, deploymentInvestors, selectedMonth]
   );
 
   // ── Computed: my deployments ──────────────────────────────
@@ -302,13 +307,17 @@ export default function InvestorDashboardPage() {
   );
 
   // ── Computed: deployment stats ────────────────────────────
+  // Idle comes from the allocator's `remaining` (reflects prior-month POs
+  // still in flight). Deployed is capital minus idle — this can exceed the
+  // sum of myDeployments[].deployed when capital is still locked from a
+  // prior month that isn't displayed in the current month's table.
 
-  const totalDeployed = useMemo(
-    () => myDeployments.reduce((s, d) => s + d.deployed, 0),
-    [myDeployments]
-  );
+  const idle = useMemo(() => {
+    if (!myInvestor) return 0;
+    return Math.max(0, remaining[myInvestor.id] ?? myInvestor.capital);
+  }, [myInvestor, remaining]);
 
-  const idle = myInvestor ? myInvestor.capital - totalDeployed : 0;
+  const totalDeployed = myInvestor ? myInvestor.capital - idle : 0;
 
   const completedDeps = useMemo(
     () => myDeployments.filter((d) => d.cycleComplete),

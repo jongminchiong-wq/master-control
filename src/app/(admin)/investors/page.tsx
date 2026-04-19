@@ -88,6 +88,7 @@ function toDeploymentPO(po: DBPO): DeploymentPO {
     dos: (po.delivery_orders ?? []).map((d) => ({
       buyerPaid: d.buyer_paid,
     })),
+    commissionsCleared: po.commissions_cleared,
   };
 }
 
@@ -299,12 +300,20 @@ function InvestorsPageContent() {
     [allPOs, selectedMonth]
   );
 
+  // POs whose po_date is on or before the selected month — the pool the
+  // allocator walks through to correctly account for prior-month deployments
+  // that are still locking up investor capital.
+  const poolPOs = useMemo(
+    () => allPOs.filter((po) => getMonth(po.po_date) <= selectedMonth),
+    [allPOs, selectedMonth]
+  );
+
   // Deployment calculation
   const { deployments, remaining } = useMemo(() => {
     const dInvestors = investors.map(toDeploymentInvestor);
-    const dPOs = monthPOs.map(toDeploymentPO);
-    return calcSharedDeployments(dPOs, dInvestors);
-  }, [investors, monthPOs]);
+    const dPOs = poolPOs.map(toDeploymentPO);
+    return calcSharedDeployments(dPOs, dInvestors, selectedMonth);
+  }, [investors, poolPOs, selectedMonth]);
 
   // Per-investor stats
   const investorStatsMap = useMemo(() => {
@@ -323,11 +332,17 @@ function InvestorsPageContent() {
     () => investors.reduce((s, i) => s + i.capital, 0),
     [investors]
   );
-  const totalDeployed = useMemo(
-    () => deployments.reduce((s, d) => s + d.deployed, 0),
-    [deployments]
+  // Idle = sum of investor balances still free at end-of-month (includes prior-
+  // month POs still in flight). Deployed = capital minus idle.
+  const totalIdle = useMemo(
+    () =>
+      investors.reduce(
+        (s, inv) => s + Math.max(0, remaining[inv.id] ?? inv.capital),
+        0
+      ),
+    [investors, remaining]
   );
-  const totalIdle = totalCapital - totalDeployed;
+  const totalDeployed = totalCapital - totalIdle;
   const totalReturnsEarned = useMemo(
     () =>
       deployments
@@ -397,10 +412,16 @@ function InvestorsPageContent() {
       return;
     }
 
-    // Calculate deployments for this month
+    // Calculate deployments for this month (walk the full pool so prior-month
+    // in-flight capital is respected, but only this month's deployments come
+    // back from the function).
     const dInvestors = investors.map(toDeploymentInvestor);
-    const dPOs = monthPOs.map(toDeploymentPO);
-    const { deployments: monthDeployments } = calcSharedDeployments(dPOs, dInvestors);
+    const dPOs = poolPOs.map(toDeploymentPO);
+    const { deployments: monthDeployments } = calcSharedDeployments(
+      dPOs,
+      dInvestors,
+      selectedMonth
+    );
 
     // For each cleared PO, credit each investor via atomic RPC
     let credited = 0;
