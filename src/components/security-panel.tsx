@@ -66,6 +66,7 @@ export function SecurityPanel() {
     const { data, error: enrollError } = await supabase.auth.mfa.enroll({
       factorType: "totp",
       friendlyName: "Google Authenticator",
+      issuer: "BridgeConnect",
     });
     setBusy(false);
     if (enrollError || !data) {
