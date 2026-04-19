@@ -631,7 +631,7 @@ export default function PlayerDashboardPage() {
           color="success"
           className="bg-success-50 border border-success-100"
         />
-        <MetricCard label="EU Commission" value={fmt(myEUComm)} color="brand">
+        <MetricCard label="Player Commission" value={fmt(myEUComm)} color="brand">
           <div className="mt-1 flex gap-2.5">
             <span className="text-[10px] font-medium text-success-600">
               Cleared {fmt(clearedEUComm)}

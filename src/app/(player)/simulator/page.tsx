@@ -308,7 +308,7 @@ export default function PlayerSimulatorPage() {
             {numRecruits > 0 && (
               <div className="mt-1 flex gap-2.5">
                 <span className="text-[10px] font-medium text-brand-600">
-                  EU {fmt(euAmt)}
+                  Player {fmt(euAmt)}
                 </span>
                 <span className="text-[10px] font-medium text-purple-600">
                   Intro {fmt(totalIntroAmt)}
@@ -323,7 +323,7 @@ export default function PlayerSimulatorPage() {
           {/* Commission sub-card */}
           <div className="rounded-lg border border-brand-100 bg-gray-50 px-5 py-4">
             <p className="text-xs font-medium uppercase tracking-wide text-brand-600">
-              My EU commission
+              My Player commission
             </p>
             <p className="mt-1 font-mono text-xl font-medium text-brand-600">
               {fmt(euAmt)}

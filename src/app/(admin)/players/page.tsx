@@ -400,7 +400,7 @@ function PlayersPageContent() {
         <div className="mt-3">
           <h1 className="text-lg font-medium text-gray-800">Players</h1>
           <p className="text-xs text-gray-500">
-            Manage end-users and view their commissions
+            Manage players and view their commissions
           </p>
         </div>
       </div>
@@ -421,7 +421,7 @@ function PlayersPageContent() {
         <MetricCard
           label="Total Commissions"
           value={fmt(totalCommissions)}
-          subtitle="EU + Introducer"
+          subtitle="Player + Introducer"
           color="brand"
         />
       </div>
@@ -460,7 +460,7 @@ function PlayersPageContent() {
                   Name
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
-                  EU Tier
+                  Player Tier
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
                   Total PO
@@ -535,7 +535,7 @@ function PlayersPageContent() {
         open={showAddDialog}
         onOpenChange={setShowAddDialog}
         title="Add Player"
-        description="Create a new end-user record."
+        description="Create a new player record."
         form={form}
         setForm={setForm}
         players={players}
@@ -647,7 +647,7 @@ function PlayerFormDialog({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-500">
-                EU Tier Mode (Proxy)
+                Player Tier Mode (Proxy)
               </label>
               <div className="flex gap-1.5">
                 {(["A", "B"] as const).map((opt) => (
@@ -887,7 +887,7 @@ function PlayerRow({
               <div className="flex gap-6">
                 <div>
                   <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-500">
-                    EU Tier Mode (Proxy)
+                    Player Tier Mode (Proxy)
                   </p>
                   <div className="flex gap-1">
                     {(["A", "B"] as const).map((opt) => (
@@ -959,7 +959,7 @@ function PlayerRow({
               {/* End-User Earnings */}
               <div className="rounded-lg border border-brand-100 bg-brand-50/30 p-4">
                 <p className="mb-3 text-[10px] font-medium uppercase tracking-wider text-brand-600">
-                  End-User Earnings
+                  Player Earnings
                 </p>
                 {playerPOs.length === 0 ? (
                   <p className="py-4 text-center text-xs text-gray-500">

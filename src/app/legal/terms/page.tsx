@@ -49,11 +49,11 @@ export default function TermsOfServicePage() {
             participants, and settles commissions and returns.
           </li>
           <li>
-            <strong>End-user</strong> — submits POs originated through their
+            <strong>Player</strong> — submits POs originated through their
             procurement relationships.
           </li>
           <li>
-            <strong>Introducer</strong> — refers end-users or participants and
+            <strong>Introducer</strong> — refers players or participants and
             receives a referral commission.
           </li>
           <li>

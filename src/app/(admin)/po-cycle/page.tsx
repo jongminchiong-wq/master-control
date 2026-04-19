@@ -598,7 +598,7 @@ function POCyclePageContent() {
           </div>
           <div>
             <label className="mb-0.5 block text-[8px] font-medium uppercase tracking-wider text-gray-400">
-              End-User
+              Player
             </label>
             <Select value={filterEU} onValueChange={(v) => { if (v) setFilterEU(v); }}>
               <SelectTrigger className="h-7 w-36 text-xs">
@@ -659,7 +659,7 @@ function POCyclePageContent() {
                   Date
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
-                  End-User
+                  Player
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
                   Introducer
@@ -674,7 +674,7 @@ function POCyclePageContent() {
                   DOs
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
-                  EU Comm
+                  Player Comm
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
                   Status
@@ -765,7 +765,7 @@ function POCyclePageContent() {
             {/* End-User */}
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-500">
-                End-User
+                Player
               </label>
               <Select
                 value={poForm.end_user_id || "__none__"}
@@ -780,7 +780,7 @@ function POCyclePageContent() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">Select end-user</SelectItem>
+                  <SelectItem value="__none__">Select player</SelectItem>
                   {players.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.name}
@@ -1627,7 +1627,7 @@ function buildWaterfallRows(
       bold: true,
     },
     {
-      label: `End-User (${w.euTier.name} ${w.euTier.rate}% of Pool)`,
+      label: `Player (${w.euTier.name} ${w.euTier.rate}% of Pool)`,
       val: -w.euAmt,
       color: "brand",
     },
@@ -1642,7 +1642,7 @@ function buildWaterfallRows(
   if (w.intro) {
     const introName = intro?.name ? `${intro.name} · ` : "";
     rows.push({
-      label: `EU Introducer (${introName}${w.introRate}% of Entity Gross)`,
+      label: `Player Introducer (${introName}${w.introRate}% of Entity Gross)`,
       val: -w.introAmt,
       color: "purple",
     });

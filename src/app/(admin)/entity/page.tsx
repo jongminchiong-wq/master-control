@@ -584,7 +584,7 @@ function EntityPageContent() {
         <MetricCard
           label="Entity Net Income"
           value={fmt(entityGrossIncome)}
-          subtitle="After EU + EU Intro deductions"
+          subtitle="After Player + Player Intro deductions"
           color={entityGrossIncome > 0 ? "accent" : "danger"}
         />
         <MetricCard
@@ -653,12 +653,12 @@ function EntityPageContent() {
                   bold: true,
                 },
                 {
-                  label: "- EU Commissions",
+                  label: "- Player Commissions",
                   val: -totalEUComm,
                   color: "brand",
                 },
                 {
-                  label: "- EU Introducer Commissions",
+                  label: "- Player Introducer Commissions",
                   val: -totalIntroComm,
                   color: "purple",
                 },
@@ -812,7 +812,7 @@ function EntityPageContent() {
                     val: cashOutInvestors,
                   },
                   {
-                    label: "- Commissions payable (EU + EU Intro)",
+                    label: "- Commissions payable (Player + Player Intro)",
                     val: cashOutCommissions,
                   },
                   {
@@ -893,7 +893,7 @@ function EntityPageContent() {
                       Player
                     </TableHead>
                     <TableHead className="text-[9px] uppercase tracking-wide">
-                      EU Commission
+                      Player Commission
                     </TableHead>
                     <TableHead className="text-[9px] uppercase tracking-wide">
                       Intro Commission

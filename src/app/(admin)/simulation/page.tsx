@@ -413,7 +413,7 @@ export default function SimulationPage() {
 
             {/* EU tier mode */}
             <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-              End-user tier system
+              Player tier system
             </p>
             {!punchoutOn ? (
               <div className="rounded-lg border border-brand-100 bg-brand-50 px-3 py-2 text-center text-xs font-medium text-brand-600">
@@ -446,7 +446,7 @@ export default function SimulationPage() {
             </p>
 
             <SliderField
-              label="Avg monthly PO per end-user"
+              label="Avg monthly PO per player"
               rangeLabel="RM 10K – 300K"
               value={monthlyPOVol}
               formatValue={fmt(monthlyPOVol)}
@@ -491,10 +491,10 @@ export default function SimulationPage() {
 
             {/* End-user network */}
             <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-              End-user network
+              Player network
             </p>
             <SliderField
-              label="Number of end-users"
+              label="Number of players"
               rangeLabel="1 – 10"
               value={numEndUsers}
               formatValue={String(numEndUsers)}
@@ -511,7 +511,7 @@ export default function SimulationPage() {
             {/* EU introducer tier */}
             <div className="space-y-2">
               <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-                EU introducer tier (auto from group PO)
+                Player introducer tier (auto from group PO)
               </p>
               {punchoutOn ? (
                 <div className="rounded-lg border border-purple-100 bg-purple-50 px-3 py-2 text-center text-xs font-medium text-purple-600">
@@ -643,7 +643,7 @@ export default function SimulationPage() {
               <MetricCard
                 label="Total group PO"
                 value={fmt(calc.totalGroupPO)}
-                subtitle={`${numEndUsers} end-user${numEndUsers > 1 ? "s" : ""} x ${fmt(monthlyPOVol)}`}
+                subtitle={`${numEndUsers} player${numEndUsers > 1 ? "s" : ""} x ${fmt(monthlyPOVol)}`}
               />
               <MetricCard
                 label={`COGS (${cogsPercent}%)`}
@@ -683,7 +683,7 @@ export default function SimulationPage() {
             <MetricCard
               label={`Pool (Gross${punchoutOn ? " - Proxy" : ""} - Investor)`}
               value={fmt(calc.pool)}
-              subtitle={`Split between end-user (${calc.endUserRate}%) and entity (${100 - calc.endUserRate}%)`}
+              subtitle={`Split between player (${calc.endUserRate}%) and entity (${100 - calc.endUserRate}%)`}
               color={calc.pool > 0 ? "accent" : "danger"}
             />
 
@@ -711,13 +711,13 @@ export default function SimulationPage() {
                     <PoolSplitBar
                       segments={[
                         {
-                          label: `End user ${calc.endUserRate}%`,
+                          label: `Player ${calc.endUserRate}%`,
                           pct: euPct,
                           colorClass: "bg-brand-400",
                           dotClass: "bg-brand-400",
                         },
                         {
-                          label: "EU introducer",
+                          label: "Player introducer",
                           pct: euIntroPctBar,
                           colorClass: "bg-purple-400",
                           dotClass: "bg-purple-400",
@@ -742,13 +742,13 @@ export default function SimulationPage() {
                 {/* Split cards */}
                 <div className="grid grid-cols-2 gap-3">
                   <MetricCard
-                    label="End user"
+                    label="Player"
                     value={fmt(calc.endUserAmt)}
                     subtitle={`${calc.euTier.name} · ${calc.endUserRate}% of pool`}
                     color="brand"
                   />
                   <MetricCard
-                    label="EU introducer"
+                    label="Player introducer"
                     value={fmt(calc.euIntroGross)}
                     subtitle={`${calc.introducerPct}% of entity's share`}
                     color="purple"
@@ -792,7 +792,7 @@ export default function SimulationPage() {
               </p>
               <div className="grid grid-cols-4 gap-3">
                 <MetricCard
-                  label="End user"
+                  label="Player"
                   value={fmt(calc.endUserAmt * 12)}
                   color="brand"
                 />
@@ -802,7 +802,7 @@ export default function SimulationPage() {
                   color="success"
                 />
                 <MetricCard
-                  label="EU introducer"
+                  label="Player introducer"
                   value={fmt(calc.euIntroGross * 12)}
                   color="purple"
                 />
@@ -820,7 +820,7 @@ export default function SimulationPage() {
             title="Cost vs earnings summary (monthly)"
             rows={[
               {
-                label: `Total group PO (${numEndUsers} EU x ${fmt(monthlyPOVol)})`,
+                label: `Total group PO (${numEndUsers} Player x ${fmt(monthlyPOVol)})`,
                 val: calc.totalGroupPO,
                 bold: true,
               },
@@ -856,7 +856,7 @@ export default function SimulationPage() {
                 bold: true,
               },
               {
-                label: `- End user (${calc.endUserRate}%)`,
+                label: `- Player (${calc.endUserRate}%)`,
                 val: -calc.endUserAmt,
                 color: "brand" as const,
               },
@@ -867,7 +867,7 @@ export default function SimulationPage() {
                 bold: true,
               },
               {
-                label: `- EU introducer (${calc.introducerPct}%)`,
+                label: `- Player introducer (${calc.introducerPct}%)`,
                 val: -calc.euIntroGross,
                 color: "purple" as const,
               },
