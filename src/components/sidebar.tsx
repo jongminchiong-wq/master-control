@@ -16,6 +16,7 @@ type NavItem = {
 
 type SidebarProps = {
   navItems: NavItem[];
+  footerNavItems?: NavItem[];
 };
 
 const STORAGE_KEY = "mc.sidebar.collapsed";
@@ -45,7 +46,52 @@ function setCollapsedStored(next: boolean) {
 // Search params worth preserving across page navigations
 const PRESERVED_PARAMS = ["month"];
 
-export function Sidebar({ navItems }: SidebarProps) {
+function renderNavItem(
+  item: NavItem,
+  pathname: string,
+  collapsed: boolean,
+  preservedQuery: string
+) {
+  const isActive =
+    pathname === item.href || pathname.startsWith(item.href + "/");
+  return (
+    <div key={item.href} className="group/tip relative">
+      <Link
+        href={item.href + preservedQuery}
+        aria-label={item.label}
+        className={cn(
+          "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+          isActive
+            ? "bg-brand-50 text-brand-600"
+            : "text-gray-500 hover:bg-gray-100 hover:text-gray-700",
+          collapsed && "justify-center px-0"
+        )}
+      >
+        {isActive && collapsed && (
+          <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-brand-400" />
+        )}
+        <item.icon
+          className={cn(
+            "size-4 shrink-0",
+            isActive ? "text-brand-400" : "text-gray-400"
+          )}
+          strokeWidth={1.5}
+        />
+        {!collapsed && <span>{item.label}</span>}
+      </Link>
+      {collapsed && (
+        <span
+          role="tooltip"
+          className="pointer-events-none absolute left-[calc(100%+8px)] top-1/2 z-50 -translate-y-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white opacity-0 transition-opacity duration-150 group-hover/tip:opacity-100"
+        >
+          {item.label}
+        </span>
+      )}
+    </div>
+  );
+}
+
+export function Sidebar({ navItems, footerNavItems = [] }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const collapsed = useSyncExternalStore(subscribe, getCollapsed, () => false);
@@ -116,54 +162,13 @@ export function Sidebar({ navItems }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 space-y-0.5 px-2 py-4">
-        {navItems.map((item) => {
-          const isActive =
-            pathname === item.href || pathname.startsWith(item.href + "/");
-          return (
-            <div key={item.href} className="group/tip relative">
-              <Link
-                href={item.href + preservedQuery}
-                aria-label={item.label}
-                className={cn(
-                  "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-brand-50 text-brand-600"
-                    : "text-gray-500 hover:bg-gray-100 hover:text-gray-700",
-                  collapsed && "justify-center px-0"
-                )}
-              >
-                {isActive && collapsed && (
-                  <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-brand-400" />
-                )}
-                <item.icon
-                  className={cn(
-                    "size-4 shrink-0",
-                    isActive ? "text-brand-400" : "text-gray-400"
-                  )}
-                  strokeWidth={1.5}
-                />
-                {!collapsed && <span>{item.label}</span>}
-              </Link>
-              {collapsed && (
-                <span
-                  role="tooltip"
-                  className="pointer-events-none absolute left-[calc(100%+8px)] top-1/2 z-50 -translate-y-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white opacity-0 transition-opacity duration-150 group-hover/tip:opacity-100"
-                >
-                  {item.label}
-                </span>
-              )}
-            </div>
-          );
-        })}
+        {navItems.map((item) => renderNavItem(item, pathname, collapsed, preservedQuery))}
       </nav>
 
       {/* Footer */}
-      <div className="space-y-2 border-t border-gray-200 px-2 py-3">
-        {!collapsed && (
-          <div className="px-2">
-            <UserBadge />
-          </div>
-        )}
+      <div className="space-y-0.5 border-t border-gray-200 px-2 py-3">
+        <UserBadge iconOnly={collapsed} />
+        {footerNavItems.map((item) => renderNavItem(item, pathname, collapsed, preservedQuery))}
         <LogoutButton iconOnly={collapsed} />
       </div>
     </aside>

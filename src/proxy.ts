@@ -60,6 +60,22 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url))
   }
 
+  // ── Enforce TOTP challenge completion ──────────────────────
+  // If the user enrolled TOTP but hasn't entered the 6-digit code yet,
+  // their session is still aal1. Force them back to /login so they can
+  // complete the challenge. Users who never enrolled have nextLevel === "aal1"
+  // and pass through unchanged.
+  const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+  if (
+    aal?.nextLevel === "aal2" &&
+    aal.currentLevel !== "aal2" &&
+    pathname !== "/login"
+  ) {
+    const loginUrl = new URL("/login", request.url)
+    loginUrl.searchParams.set("error", "mfa_required")
+    return NextResponse.redirect(loginUrl)
+  }
+
   // ── Authenticated — look up role ───────────────────────────
   const { data: userRecord } = await supabase
     .from("users")

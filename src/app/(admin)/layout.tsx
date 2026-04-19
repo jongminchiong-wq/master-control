@@ -7,6 +7,7 @@ import {
   Wallet,
   Building2,
   Calculator,
+  Shield,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { Footer } from "@/components/footer";
@@ -19,6 +20,10 @@ const navItems = [
   { href: "/simulation", label: "Simulation", icon: Calculator },
 ];
 
+const footerNavItems = [
+  { href: "/security", label: "Security", icon: Shield },
+];
+
 export default function AdminLayout({
   children,
 }: {
@@ -26,7 +31,7 @@ export default function AdminLayout({
 }) {
   return (
     <div className="flex h-screen">
-      <Suspense><Sidebar navItems={navItems} /></Suspense>
+      <Suspense><Sidebar navItems={navItems} footerNavItems={footerNavItems} /></Suspense>
       <main className="flex flex-1 flex-col overflow-auto bg-gray-50 p-6">
         {children}
         <Footer />
