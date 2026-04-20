@@ -1365,6 +1365,12 @@ function InvestorFormDialog({
               Introduced By
             </label>
             <Select
+              items={[
+                { value: "__none__", label: "None" },
+                ...investors
+                  .filter((i) => i.id !== excludeId)
+                  .map((i) => ({ value: i.id, label: i.name })),
+              ]}
               value={form.introduced_by || "__none__"}
               onValueChange={(v) =>
                 setForm((prev) => ({

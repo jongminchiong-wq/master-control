@@ -600,7 +600,14 @@ function POCyclePageContent() {
             <label className="mb-0.5 block text-[8px] font-medium uppercase tracking-wider text-gray-400">
               Player
             </label>
-            <Select value={filterEU} onValueChange={(v) => { if (v) setFilterEU(v); }}>
+            <Select
+              items={[
+                { value: "__all__", label: "All" },
+                ...players.map((p) => ({ value: p.id, label: p.name })),
+              ]}
+              value={filterEU}
+              onValueChange={(v) => { if (v) setFilterEU(v); }}
+            >
               <SelectTrigger className="h-7 w-36 text-xs">
                 <SelectValue />
               </SelectTrigger>
@@ -768,6 +775,10 @@ function POCyclePageContent() {
                 Player
               </label>
               <Select
+                items={[
+                  { value: "__none__", label: "Select player" },
+                  ...players.map((p) => ({ value: p.id, label: p.name })),
+                ]}
                 value={poForm.end_user_id || "__none__"}
                 onValueChange={(v) =>
                   setPOForm((prev) => ({

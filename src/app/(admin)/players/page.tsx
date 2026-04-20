@@ -707,6 +707,12 @@ function PlayerFormDialog({
               Introduced By
             </label>
             <Select
+              items={[
+                { value: "__none__", label: "None" },
+                ...players
+                  .filter((p) => p.id !== excludeId)
+                  .map((p) => ({ value: p.id, label: p.name })),
+              ]}
               value={form.introduced_by || "__none__"}
               onValueChange={(v) =>
                 setForm((prev) => ({
