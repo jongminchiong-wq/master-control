@@ -20,6 +20,7 @@ import {
   type Deployment,
   type DeploymentPO,
   type DeploymentInvestor,
+  type CapitalEvent,
 } from "@/lib/business-logic/deployment";
 import { fmt, getMonth } from "@/lib/business-logic/formatters";
 import { useSelectedMonth } from "@/lib/hooks/use-selected-month";
@@ -52,6 +53,7 @@ type DBPO = Tables<"purchase_orders"> & {
   delivery_orders: Tables<"delivery_orders">[];
 };
 type DBOpex = Tables<"opex">;
+type DBCompoundLog = Tables<"compound_log">;
 
 // ── DB → Business-logic mappers ────────────────────────────
 
@@ -209,6 +211,7 @@ function EntityPageContent() {
   const [players, setPlayers] = useState<DBPlayer[]>([]);
   const [investors, setInvestors] = useState<DBInvestor[]>([]);
   const [allPOs, setAllPOs] = useState<DBPO[]>([]);
+  const [compoundLogs, setCompoundLogs] = useState<DBCompoundLog[]>([]);
   const [opex, setOpex] = useState<DBOpex | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -243,23 +246,29 @@ function EntityPageContent() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [playersRes, investorsRes, posRes] = await Promise.all([
-      supabase
-        .from("players")
-        .select("*")
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("investors")
-        .select("*")
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("purchase_orders")
-        .select("*, delivery_orders(*)")
-        .order("po_date", { ascending: true }),
-    ]);
+    const [playersRes, investorsRes, posRes, compoundLogRes] =
+      await Promise.all([
+        supabase
+          .from("players")
+          .select("*")
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("investors")
+          .select("*")
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("purchase_orders")
+          .select("*, delivery_orders(*)")
+          .order("po_date", { ascending: true }),
+        supabase
+          .from("compound_log")
+          .select("*")
+          .order("created_at", { ascending: true }),
+      ]);
     if (playersRes.data) setPlayers(playersRes.data);
     if (investorsRes.data) setInvestors(investorsRes.data);
     if (posRes.data) setAllPOs(posRes.data as DBPO[]);
+    if (compoundLogRes.data) setCompoundLogs(compoundLogRes.data);
     setLoading(false);
   }, [supabase]);
 
@@ -375,12 +384,31 @@ function EntityPageContent() {
     [allPOs, selectedMonth]
   );
 
+  // Capital-change events from compound_log — prevents reinvested returns
+  // from retroactively inflating allocations on POs dated before the reinvest.
+  const capitalEvents = useMemo<CapitalEvent[]>(
+    () =>
+      compoundLogs
+        .filter((log) => log.created_at)
+        .map((log) => ({
+          investorId: log.investor_id,
+          date: (log.created_at as string).slice(0, 10),
+          delta: log.capital_after - log.capital_before,
+        })),
+    [compoundLogs]
+  );
+
   // ── Deployment calculations ──────────────────────────────
 
   const { deployments } = useMemo(() => {
     const dPoolPOs = poolPOs.map(toDeploymentPO);
-    return calcSharedDeployments(dPoolPOs, dInvestors, selectedMonth);
-  }, [poolPOs, dInvestors, selectedMonth]);
+    return calcSharedDeployments(
+      dPoolPOs,
+      dInvestors,
+      capitalEvents,
+      selectedMonth
+    );
+  }, [poolPOs, dInvestors, capitalEvents, selectedMonth]);
 
   // ── Investor introducer commissions ──────────────────────
 

@@ -14,6 +14,7 @@ import {
   type Deployment,
   type DeploymentPO,
   type DeploymentInvestor,
+  type CapitalEvent,
 } from "@/lib/business-logic/deployment";
 import { fmt, getMonth, fmtMonth } from "@/lib/business-logic/formatters";
 import {
@@ -63,6 +64,7 @@ import {
 type DBInvestor = Tables<"investors">;
 type DBWithdrawal = Tables<"withdrawals">;
 type DBReturnCredit = Tables<"return_credits">;
+type DBCompoundLog = Tables<"compound_log">;
 type DBPO = Tables<"purchase_orders"> & {
   delivery_orders: Tables<"delivery_orders">[];
 };
@@ -201,6 +203,7 @@ function InvestorsPageContent() {
   const [allPOs, setAllPOs] = useState<DBPO[]>([]);
   const [withdrawals, setWithdrawals] = useState<DBWithdrawal[]>([]);
   const [returnCredits, setReturnCredits] = useState<DBReturnCredit[]>([]);
+  const [compoundLogs, setCompoundLogs] = useState<DBCompoundLog[]>([]);
   const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -247,31 +250,42 @@ function InvestorsPageContent() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [investorsRes, posRes, withdrawalsRes, creditsRes, ledgerRes] =
-      await Promise.all([
-        supabase
-          .from("investors")
-          .select("*")
-          .order("created_at", { ascending: true }),
-        supabase
-          .from("purchase_orders")
-          .select("*, delivery_orders(*)")
-          .order("po_date", { ascending: true }),
-        supabase
-          .from("withdrawals")
-          .select("*")
-          .order("requested_at", { ascending: false }),
-        supabase.from("return_credits").select("*"),
-        supabase
-          .from("v_investor_ledger")
-          .select("*")
-          .order("at", { ascending: false }),
-      ]);
+    const [
+      investorsRes,
+      posRes,
+      withdrawalsRes,
+      creditsRes,
+      ledgerRes,
+      compoundLogRes,
+    ] = await Promise.all([
+      supabase
+        .from("investors")
+        .select("*")
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("purchase_orders")
+        .select("*, delivery_orders(*)")
+        .order("po_date", { ascending: true }),
+      supabase
+        .from("withdrawals")
+        .select("*")
+        .order("requested_at", { ascending: false }),
+      supabase.from("return_credits").select("*"),
+      supabase
+        .from("v_investor_ledger")
+        .select("*")
+        .order("at", { ascending: false }),
+      supabase
+        .from("compound_log")
+        .select("*")
+        .order("created_at", { ascending: true }),
+    ]);
     if (investorsRes.data) setInvestors(investorsRes.data);
     if (posRes.data) setAllPOs(posRes.data as DBPO[]);
     if (withdrawalsRes.data) setWithdrawals(withdrawalsRes.data);
     if (creditsRes.data) setReturnCredits(creditsRes.data);
     if (ledgerRes.data) setLedgerRows(ledgerRes.data);
+    if (compoundLogRes.data) setCompoundLogs(compoundLogRes.data);
     setLoading(false);
   }, [supabase]);
 
@@ -308,12 +322,26 @@ function InvestorsPageContent() {
     [allPOs, selectedMonth]
   );
 
+  // Capital-change events derived from compound_log. Feeds the allocator so
+  // reinvested returns only affect POs dated *after* the reinvest, not before.
+  const capitalEvents = useMemo<CapitalEvent[]>(
+    () =>
+      compoundLogs
+        .filter((log) => log.created_at)
+        .map((log) => ({
+          investorId: log.investor_id,
+          date: (log.created_at as string).slice(0, 10),
+          delta: log.capital_after - log.capital_before,
+        })),
+    [compoundLogs]
+  );
+
   // Deployment calculation
   const { deployments, remaining } = useMemo(() => {
     const dInvestors = investors.map(toDeploymentInvestor);
     const dPOs = poolPOs.map(toDeploymentPO);
-    return calcSharedDeployments(dPOs, dInvestors, selectedMonth);
-  }, [investors, poolPOs, selectedMonth]);
+    return calcSharedDeployments(dPOs, dInvestors, capitalEvents, selectedMonth);
+  }, [investors, poolPOs, capitalEvents, selectedMonth]);
 
   // Per-investor stats
   const investorStatsMap = useMemo(() => {
@@ -420,6 +448,7 @@ function InvestorsPageContent() {
     const { deployments: monthDeployments } = calcSharedDeployments(
       dPOs,
       dInvestors,
+      capitalEvents,
       selectedMonth
     );
 

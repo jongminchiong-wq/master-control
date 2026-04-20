@@ -22,6 +22,16 @@ export interface DeploymentInvestor {
   dateJoined: string;
 }
 
+// A capital-change event for an investor (e.g. reinvested return moving
+// cash_balance -> capital). `date` is the ISO date the change took effect;
+// `delta` is capital_after - capital_before (positive for reinvest, could be
+// negative if we ever model withdrawals).
+export interface CapitalEvent {
+  investorId: string;
+  date: string;
+  delta: number;
+}
+
 // ── Output type ─────────────────────────────────────────────
 
 export interface Deployment {
@@ -44,14 +54,23 @@ export interface Deployment {
 // Auto-pool: proportional split by capital.
 //
 // Callers should pass every PO whose po_date is on or before the last day
-// of `selectedMonth`. The allocator walks a chronological event timeline:
+// of `selectedMonth`, plus every capital event (compound_log entry) in the
+// same horizon. The allocator walks a chronological event timeline:
 //
-//   - alloc event at po.poDate       → deduct deployed capital from investors
-//   - return event at po.commissionsCleared (if set and ≤ end of selectedMonth)
-//                                     → return that PO's deployed capital
+//   - alloc   event at po.poDate             → deduct deployed capital
+//   - return  event at po.commissionsCleared → refund that PO's deployed capital
+//   - capital event at compound_log.created_at → credit reinvested return
 //
-// Ties on the same date: returns fire before allocations, so capital freed on
-// day D is available for any PO also dated D.
+// Ties on the same date: returns fire first (free capital), then capital
+// credits, then allocations — so capital credited on day D is available for
+// any PO also dated D.
+//
+// Seeding: `investors[i].capital` is the *current* value (includes every
+// past reinvest). We subtract the sum of in-horizon capital deltas so
+// `remaining` starts at the pre-reinvest capital; each capital event then
+// re-adds its delta at the correct point in time. This prevents a reinvest
+// on day X from retroactively inflating an investor's allocation on any PO
+// dated before X.
 //
 // `remaining` reflects investors' idle capital as of end-of-selectedMonth.
 // Returned `deployments` are filtered to POs whose poDate is in selectedMonth,
@@ -60,8 +79,8 @@ export interface Deployment {
 // as rows.)
 //
 // When `selectedMonth` is omitted, the function falls back to treating every
-// passed-in PO as in-scope for both allocation and display, matching the
-// original behaviour for callers that already scope their input.
+// passed-in PO and capital event as in-scope for both allocation and display,
+// matching the original behaviour for callers that already scope their input.
 
 const endOfMonth = (month: string): string => {
   // month is "YYYY-MM"; returns "YYYY-MM-31" which sorts correctly against any
@@ -78,11 +97,18 @@ type ReturnEvent = {
   po: DeploymentPO;
   allocs: Array<{ investorId: string; deployed: number }>;
 };
-type TimelineEvent = AllocEvent | ReturnEvent;
+type CapitalChangeEvent = {
+  kind: "capital";
+  date: string;
+  investorId: string;
+  delta: number;
+};
+type TimelineEvent = AllocEvent | ReturnEvent | CapitalChangeEvent;
 
 export const calcSharedDeployments = (
   poolPOs: DeploymentPO[],
   investors: DeploymentInvestor[],
+  capitalEvents: CapitalEvent[] = [],
   selectedMonth?: string
 ): { deployments: Deployment[]; remaining: Record<string, number> } => {
   const horizon = selectedMonth ? endOfMonth(selectedMonth) : null;
@@ -121,18 +147,57 @@ export const calcSharedDeployments = (
     }
   }
 
-  // Stable sort: by date ascending, returns before allocs on the same date,
-  // then by ref to keep allocation order deterministic.
+  // Capital events in horizon become timeline events. Investor's current
+  // `capital` already reflects every event in this list (the DB moves
+  // cash_balance -> capital atomically with a compound_log insert), so the
+  // delta is "applied" not "additive" — we just need to defer it to its date.
+  const inHorizonCapitalEvents = capitalEvents.filter(
+    (ev) => !horizon || (ev.date || "") <= horizon
+  );
+  for (const ev of inHorizonCapitalEvents) {
+    events.push({
+      kind: "capital",
+      date: ev.date || "",
+      investorId: ev.investorId,
+      delta: ev.delta,
+    });
+  }
+
+  // Stable sort: by date ascending; on the same date: returns first (free
+  // capital), then capital credits, then allocations. Within the same event
+  // kind, keep original order (POs by ref, capital events stable).
+  const kindOrder: Record<TimelineEvent["kind"], number> = {
+    return: 0,
+    capital: 1,
+    alloc: 2,
+  };
   events.sort((a, b) => {
     const byDate = (a.date || "").localeCompare(b.date || "");
     if (byDate !== 0) return byDate;
-    if (a.kind !== b.kind) return a.kind === "return" ? -1 : 1;
-    return (a.po.ref || "").localeCompare(b.po.ref || "");
+    if (a.kind !== b.kind) return kindOrder[a.kind] - kindOrder[b.kind];
+    if (a.kind === "alloc" && b.kind === "alloc") {
+      return (a.po.ref || "").localeCompare(b.po.ref || "");
+    }
+    if (a.kind === "return" && b.kind === "return") {
+      return (a.po.ref || "").localeCompare(b.po.ref || "");
+    }
+    return 0;
   });
 
+  // Seed `remaining` with each investor's capital *before* any in-horizon
+  // capital events. Current `investors[i].capital` already includes those
+  // deltas (reinvest modifies investors.capital atomically with the log row),
+  // so we subtract them back out; each capital event then re-adds its delta
+  // at the correct point in the timeline.
+  const deltaInHorizonByInvestor: Record<string, number> = {};
+  for (const ev of inHorizonCapitalEvents) {
+    deltaInHorizonByInvestor[ev.investorId] =
+      (deltaInHorizonByInvestor[ev.investorId] || 0) + ev.delta;
+  }
   const remaining: Record<string, number> = {};
   investors.forEach((inv) => {
-    remaining[inv.id] = inv.capital;
+    remaining[inv.id] =
+      inv.capital - (deltaInHorizonByInvestor[inv.id] || 0);
   });
 
   const deploymentsAll: Deployment[] = [];
@@ -143,6 +208,12 @@ export const calcSharedDeployments = (
         remaining[alloc.investorId] =
           (remaining[alloc.investorId] || 0) + alloc.deployed;
       }
+      continue;
+    }
+
+    if (event.kind === "capital") {
+      remaining[event.investorId] =
+        (remaining[event.investorId] || 0) + event.delta;
       continue;
     }
 

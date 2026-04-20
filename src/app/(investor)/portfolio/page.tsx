@@ -14,6 +14,7 @@ import {
   type DeploymentPO,
   type DeploymentInvestor,
   type Deployment,
+  type CapitalEvent,
 } from "@/lib/business-logic/deployment";
 import { fmt, getMonth, fmtMonth } from "@/lib/business-logic/formatters";
 import {
@@ -77,6 +78,7 @@ type DBWithdrawal = Tables<"withdrawals">;
 type DBPO = Tables<"purchase_orders"> & {
   delivery_orders: Tables<"delivery_orders">[];
 };
+type DBCompoundLog = Tables<"compound_log">;
 
 // ── DB → Business-logic mappers ─────────────────────────────
 
@@ -143,6 +145,7 @@ export default function InvestorDashboardPage() {
   const [myInvestor, setMyInvestor] = useState<DBInvestor | null>(null);
   const [allInvestors, setAllInvestors] = useState<DBInvestor[]>([]);
   const [allPOs, setAllPOs] = useState<DBPO[]>([]);
+  const [compoundLogs, setCompoundLogs] = useState<DBCompoundLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorState, setErrorState] = useState<
     "not_authenticated" | "no_investor" | null
@@ -202,31 +205,40 @@ export default function InvestorDashboardPage() {
 
     setMyInvestor(investorData);
 
-    const [investorsRes, posRes, withdrawalsRes, ledgerRes] = await Promise.all([
-      supabase
-        .from("investors")
-        .select("*")
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("purchase_orders")
-        .select("*, delivery_orders(*)")
-        .order("po_date", { ascending: true }),
-      supabase
-        .from("withdrawals")
-        .select("*")
-        .eq("investor_id", investorData.id)
-        .order("requested_at", { ascending: false }),
-      supabase
-        .from("v_investor_ledger")
-        .select("*")
-        .eq("investor_id", investorData.id)
-        .order("at", { ascending: false }),
-    ]);
+    const [investorsRes, posRes, withdrawalsRes, ledgerRes, compoundLogRes] =
+      await Promise.all([
+        supabase
+          .from("investors")
+          .select("*")
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("purchase_orders")
+          .select("*, delivery_orders(*)")
+          .order("po_date", { ascending: true }),
+        supabase
+          .from("withdrawals")
+          .select("*")
+          .eq("investor_id", investorData.id)
+          .order("requested_at", { ascending: false }),
+        supabase
+          .from("v_investor_ledger")
+          .select("*")
+          .eq("investor_id", investorData.id)
+          .order("at", { ascending: false }),
+        // All investors' compound_log — needed because the deployment pool
+        // allocates proportionally across all investors. RLS must allow
+        // investors to read sibling rows for this to return useful data.
+        supabase
+          .from("compound_log")
+          .select("*")
+          .order("created_at", { ascending: true }),
+      ]);
 
     if (investorsRes.data) setAllInvestors(investorsRes.data);
     if (posRes.data) setAllPOs(posRes.data as DBPO[]);
     if (withdrawalsRes.data) setMyWithdrawals(withdrawalsRes.data);
     if (ledgerRes.data) setMyLedger(ledgerRes.data);
+    if (compoundLogRes.data) setCompoundLogs(compoundLogRes.data);
 
     // Auto-compound on read: if compound window has passed, compound automatically
     if (
@@ -286,10 +298,30 @@ export default function InvestorDashboardPage() {
     [allInvestors]
   );
 
+  // Capital-change events from compound_log. The allocator uses these to
+  // defer reinvested returns to their actual date instead of baking them
+  // into every historical PO's allocation.
+  const capitalEvents = useMemo<CapitalEvent[]>(
+    () =>
+      compoundLogs
+        .filter((log) => log.created_at)
+        .map((log) => ({
+          investorId: log.investor_id,
+          date: (log.created_at as string).slice(0, 10),
+          delta: log.capital_after - log.capital_before,
+        })),
+    [compoundLogs]
+  );
+
   const { deployments: allDeployments, remaining } = useMemo(
     () =>
-      calcSharedDeployments(deploymentPOs, deploymentInvestors, selectedMonth),
-    [deploymentPOs, deploymentInvestors, selectedMonth]
+      calcSharedDeployments(
+        deploymentPOs,
+        deploymentInvestors,
+        capitalEvents,
+        selectedMonth
+      ),
+    [deploymentPOs, deploymentInvestors, capitalEvents, selectedMonth]
   );
 
   // ── Computed: my deployments ──────────────────────────────
