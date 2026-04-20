@@ -22,6 +22,7 @@ import {
   type DeploymentInvestor,
   type CapitalEvent,
 } from "@/lib/business-logic/deployment";
+import { calcFundingStatus } from "@/lib/business-logic/funding-status";
 import { fmt, getMonth } from "@/lib/business-logic/formatters";
 import { useSelectedMonth } from "@/lib/hooks/use-selected-month";
 
@@ -32,6 +33,7 @@ import { MonthPicker } from "@/components/month-picker";
 import { SectionHeader } from "@/components/section-header";
 import { HealthCheck } from "@/components/health-check";
 import { WaterfallTable } from "@/components/waterfall-table";
+import { UnfundedBanner } from "@/components/unfunded-banner";
 
 // UI components
 import { Button } from "@/components/ui/button";
@@ -400,7 +402,7 @@ function EntityPageContent() {
 
   // ── Deployment calculations ──────────────────────────────
 
-  const { deployments } = useMemo(() => {
+  const { deployments, remaining } = useMemo(() => {
     const dPoolPOs = poolPOs.map(toDeploymentPO);
     return calcSharedDeployments(
       dPoolPOs,
@@ -409,6 +411,36 @@ function EntityPageContent() {
       selectedMonth
     );
   }, [poolPOs, dInvestors, capitalEvents, selectedMonth]);
+
+  // ── Platform funding status (pool-wide, for unfunded banner) ─────────────
+
+  const monthDeploymentPOs = useMemo(
+    () => monthPOs.map(toDeploymentPO),
+    [monthPOs]
+  );
+
+  const asOfDate = useMemo(() => {
+    const d = new Date();
+    return (
+      d.getFullYear() +
+      "-" +
+      String(d.getMonth() + 1).padStart(2, "0") +
+      "-" +
+      String(d.getDate()).padStart(2, "0")
+    );
+  }, []);
+
+  const fundingStatus = useMemo(
+    () =>
+      calcFundingStatus({
+        monthPOs: monthDeploymentPOs,
+        deployments,
+        investors: dInvestors,
+        remaining,
+        asOfDate,
+      }),
+    [monthDeploymentPOs, deployments, dInvestors, remaining, asOfDate]
+  );
 
   // ── Investor introducer commissions ──────────────────────
 
@@ -628,6 +660,9 @@ function EntityPageContent() {
           color={entityNetProfit >= 0 ? "success" : "danger"}
         />
       </div>
+
+      {/* Unfunded Banner — only renders when unfunded POs exist */}
+      <UnfundedBanner status={fundingStatus} />
 
       {/* Health Check */}
       <HealthCheck entityNet={entityNetProfit} />

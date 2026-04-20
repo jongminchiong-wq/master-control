@@ -16,6 +16,7 @@ import {
   type Deployment,
   type CapitalEvent,
 } from "@/lib/business-logic/deployment";
+import { calcFundingStatus } from "@/lib/business-logic/funding-status";
 import { fmt, getMonth, fmtMonth } from "@/lib/business-logic/formatters";
 import {
   shouldAutoCompound,
@@ -29,6 +30,7 @@ import {
 import { TierCard } from "@/components/tier-card";
 import { ChannelBadge } from "@/components/channel-badge";
 import { MonthPicker } from "@/components/month-picker";
+import { FundingOpportunities } from "@/components/funding-opportunities";
 
 // UI components
 import { Button } from "@/components/ui/button";
@@ -157,6 +159,7 @@ export default function InvestorDashboardPage() {
   const [introOpen, setIntroOpen] = useState(false);
   const [withdrawalsOpen, setWithdrawalsOpen] = useState(false);
   const [ledgerOpen, setLedgerOpen] = useState(false);
+  const [topUpOpen, setTopUpOpen] = useState(false);
 
   // Capital history
   const [myLedger, setMyLedger] = useState<LedgerRow[]>([]);
@@ -322,6 +325,38 @@ export default function InvestorDashboardPage() {
         selectedMonth
       ),
     [deploymentPOs, deploymentInvestors, capitalEvents, selectedMonth]
+  );
+
+  // ── Computed: platform funding status (pool-wide) ─────────
+  // Aggregates demand vs pool capacity across the selected month. Drives
+  // the platform funding gauge shown below the hero.
+
+  const monthDeploymentPOs = useMemo(
+    () => deploymentPOs.filter((po) => getMonth(po.poDate) === selectedMonth),
+    [deploymentPOs, selectedMonth]
+  );
+
+  const asOfDate = useMemo(() => {
+    const d = new Date();
+    return (
+      d.getFullYear() +
+      "-" +
+      String(d.getMonth() + 1).padStart(2, "0") +
+      "-" +
+      String(d.getDate()).padStart(2, "0")
+    );
+  }, []);
+
+  const fundingStatus = useMemo(
+    () =>
+      calcFundingStatus({
+        monthPOs: monthDeploymentPOs,
+        deployments: allDeployments,
+        investors: deploymentInvestors,
+        remaining,
+        asOfDate,
+      }),
+    [monthDeploymentPOs, allDeployments, deploymentInvestors, remaining, asOfDate]
   );
 
   // ── Computed: my deployments ──────────────────────────────
@@ -602,6 +637,16 @@ export default function InvestorDashboardPage() {
           </div>
         )}
       </div>
+
+      {/* ═══ FUNDING OPPORTUNITIES (unfunded POs in pool) ═══ */}
+      <FundingOpportunities
+        status={fundingStatus}
+        investorTierRate={myTier.rate}
+        investorTierName={myTier.name}
+        idleCapital={idle}
+        onFund={() => setTopUpOpen(true)}
+        onTopUp={() => setTopUpOpen(true)}
+      />
 
       {/* ═══ CASH BALANCE CARD ═══ */}
       {cashBalance > 0 && (
@@ -1370,6 +1415,31 @@ export default function InvestorDashboardPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* ═══ TOP UP CAPITAL DIALOG ═══ */}
+      <Dialog open={topUpOpen} onOpenChange={setTopUpOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add more money</DialogTitle>
+            <DialogDescription>
+              The more you put in, the more you earn each month.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-gray-600">
+            <p>
+              Message your admin the amount you&apos;d like to add. Once
+              they top up your account, your money automatically starts
+              earning from the next PO — you don&apos;t need to do anything
+              else.
+            </p>
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Close
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
