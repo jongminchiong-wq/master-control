@@ -25,7 +25,13 @@ type Stage =
   | { kind: "enrolled"; factorId: string }
   | { kind: "disabling"; factorId: string };
 
-export function SecurityPanel() {
+export function SecurityPanel({
+  canDisable = true,
+  onEnrollmentChange,
+}: {
+  canDisable?: boolean;
+  onEnrollmentChange?: (enrolled: boolean) => void;
+}) {
   const [stage, setStage] = useState<Stage>({ kind: "loading" });
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -43,6 +49,7 @@ export function SecurityPanel() {
     const verified = data.totp[0];
     if (verified) {
       setStage({ kind: "enrolled", factorId: verified.id });
+      onEnrollmentChange?.(true);
       return;
     }
     // Clean up any abandoned unverified TOTP factors so enroll doesn't fail
@@ -53,7 +60,8 @@ export function SecurityPanel() {
       await supabase.auth.mfa.unenroll({ factorId: f.id });
     }
     setStage({ kind: "idle" });
-  }, []);
+    onEnrollmentChange?.(false);
+  }, [onEnrollmentChange]);
 
   useEffect(() => {
     refresh();
@@ -272,17 +280,21 @@ export function SecurityPanel() {
           {stage.kind === "enrolled" && (
             <div className="flex flex-col gap-3">
               <div className="rounded-md bg-success-50 px-3 py-2 text-sm text-success-800">
-                Two-factor authentication is on for your account.
+                {canDisable
+                  ? "Two-factor authentication is on for your account."
+                  : "Two-factor authentication is on and required for your account."}
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy}
-                onClick={disableMfa}
-                className="w-fit border-danger-200 text-danger-600 hover:bg-danger-50"
-              >
-                {busy ? "Turning off…" : "Turn off two-factor authentication"}
-              </Button>
+              {canDisable && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={disableMfa}
+                  className="w-fit border-danger-200 text-danger-600 hover:bg-danger-50"
+                >
+                  {busy ? "Turning off…" : "Turn off two-factor authentication"}
+                </Button>
+              )}
             </div>
           )}
 
