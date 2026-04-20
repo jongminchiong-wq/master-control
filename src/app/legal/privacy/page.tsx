@@ -1,17 +1,6 @@
 export default function PrivacyNoticePage() {
   return (
     <article className="space-y-8">
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-        <p className="font-medium">
-          Draft — pending legal review. Not yet effective.
-        </p>
-        <p className="mt-1 text-xs text-amber-700">
-          This document is a first draft and must be reviewed by qualified
-          Malaysian counsel before it is relied upon. Do not treat this as
-          final.
-        </p>
-      </div>
-
       <header>
         <h1 className="text-3xl font-medium tracking-tight text-gray-900">
           Privacy Notice
@@ -32,7 +21,7 @@ export default function PrivacyNoticePage() {
         </p>
         <p>
           Our data protection contact is{" "}
-          <span className="font-mono">[TODO: email]</span>.
+          info@bridgeconnect.network.
         </p>
       </section>
 
@@ -162,7 +151,7 @@ export default function PrivacyNoticePage() {
         </ul>
         <p>
           To exercise any of these rights, contact us at{" "}
-          <span className="font-mono">[TODO: email]</span>.
+          info@bridgeconnect.network.
         </p>
       </section>
 

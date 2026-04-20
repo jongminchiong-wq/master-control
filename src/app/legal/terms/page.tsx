@@ -1,17 +1,6 @@
 export default function TermsOfServicePage() {
   return (
     <article className="space-y-8">
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-        <p className="font-medium">
-          Draft — pending legal review. Not yet effective.
-        </p>
-        <p className="mt-1 text-xs text-amber-700">
-          This document is a first draft and must be reviewed by qualified
-          Malaysian counsel before it is relied upon. Do not treat this as
-          final.
-        </p>
-      </div>
-
       <header>
         <h1 className="text-3xl font-medium tracking-tight text-gray-900">
           Terms of Service
@@ -217,7 +206,7 @@ export default function TermsOfServicePage() {
         <h2 className="text-xl font-medium text-gray-900">12. Contact</h2>
         <p>
           Questions about these Terms:{" "}
-          <span className="font-mono">[TODO: email]</span>.
+          info@bridgeconnect.network.
         </p>
       </section>
     </article>

@@ -1,17 +1,6 @@
 export default function DisclosuresPage() {
   return (
     <article className="space-y-8">
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-        <p className="font-medium">
-          Draft — pending legal review. Not yet effective.
-        </p>
-        <p className="mt-1 text-xs text-amber-700">
-          This document is a first draft and must be reviewed by qualified
-          Malaysian counsel before it is relied upon. Do not treat this as
-          final.
-        </p>
-      </div>
-
       <header>
         <h1 className="text-3xl font-medium tracking-tight text-gray-900">
           Disclosures
@@ -21,7 +10,7 @@ export default function DisclosuresPage() {
         </p>
       </header>
 
-      <section className="rounded-xl border-2 border-danger-100 bg-danger-50 p-5 text-sm leading-relaxed text-danger-800">
+      <section className="rounded-xl border border-gray-200 bg-gray-50 p-5 text-sm leading-relaxed text-gray-700">
         <p className="font-semibold uppercase tracking-wide">
           Important — please read
         </p>
@@ -154,7 +143,7 @@ export default function DisclosuresPage() {
         <h2 className="text-xl font-medium text-gray-900">7. Contact</h2>
         <p>
           Questions about these disclosures or about a specific cycle:{" "}
-          <span className="font-mono">[TODO: email]</span>.
+          info@bridgeconnect.network.
         </p>
       </section>
     </article>
