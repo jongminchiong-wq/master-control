@@ -66,11 +66,12 @@ export interface Deployment {
 // any PO also dated D.
 //
 // Seeding: `investors[i].capital` is the *current* value (includes every
-// past reinvest). We subtract the sum of in-horizon capital deltas so
-// `remaining` starts at the pre-reinvest capital; each capital event then
-// re-adds its delta at the correct point in time. This prevents a reinvest
-// on day X from retroactively inflating an investor's allocation on any PO
-// dated before X.
+// past reinvest). We subtract the sum of ALL capital-event deltas so
+// `remaining` starts at each investor's *initial* capital. In-horizon
+// events then replay on the timeline; out-of-horizon events stay out
+// (they haven't happened yet as far as the horizon is concerned). This
+// keeps two-way stability: a future reinvest doesn't inflate past POs,
+// and a newer reinvest doesn't retroactively disturb past-month views.
 //
 // `remaining` reflects investors' idle capital as of end-of-selectedMonth.
 // Returned `deployments` are filtered to POs whose poDate is in selectedMonth,
@@ -184,20 +185,22 @@ export const calcSharedDeployments = (
     return 0;
   });
 
-  // Seed `remaining` with each investor's capital *before* any in-horizon
-  // capital events. Current `investors[i].capital` already includes those
-  // deltas (reinvest modifies investors.capital atomically with the log row),
-  // so we subtract them back out; each capital event then re-adds its delta
-  // at the correct point in the timeline.
-  const deltaInHorizonByInvestor: Record<string, number> = {};
-  for (const ev of inHorizonCapitalEvents) {
-    deltaInHorizonByInvestor[ev.investorId] =
-      (deltaInHorizonByInvestor[ev.investorId] || 0) + ev.delta;
+  // Seed `remaining` with each investor's *initial* capital by subtracting
+  // ALL capital events (not just in-horizon). Rationale: `investors[i].capital`
+  // is the current value, which already includes every past reinvest. If we
+  // only subtract in-horizon deltas, an out-of-horizon future reinvest would
+  // bleed into the past view (e.g. reinvesting Mar returns on 04-20 would
+  // inflate March's allocation when someone flips the dropdown back to March).
+  // In-horizon events replay on the timeline below to bring `remaining` up
+  // to the correct value at horizon end; out-of-horizon events stay out.
+  const totalDeltaByInvestor: Record<string, number> = {};
+  for (const ev of capitalEvents) {
+    totalDeltaByInvestor[ev.investorId] =
+      (totalDeltaByInvestor[ev.investorId] || 0) + ev.delta;
   }
   const remaining: Record<string, number> = {};
   investors.forEach((inv) => {
-    remaining[inv.id] =
-      inv.capital - (deltaInHorizonByInvestor[inv.id] || 0);
+    remaining[inv.id] = inv.capital - (totalDeltaByInvestor[inv.id] || 0);
   });
 
   const deploymentsAll: Deployment[] = [];

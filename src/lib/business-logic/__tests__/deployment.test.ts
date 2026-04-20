@@ -194,4 +194,55 @@ const capitalEvents: CapitalEvent[] = [
   console.log("✓ Same-day capital event fires before allocation");
 }
 
+// ── Test 5: past-month view is stable against later reinvests ─────────────
+// After the user clears Mar on 04-20 and reinvests Mar returns, flipping
+// the dropdown back to March should still show the historically-paid split
+// (A=473, B=527) — not a recomputed number inflated by the 04-20 reinvest.
+
+{
+  // Investors as of today (post all reinvests):
+  //   A: 10,000 + 40 (Feb reinvest) + 19 (Mar reinvest) = 10,059
+  //   B: 10,000 + 21 (Mar reinvest)                     = 10,021
+  //   C: 10,000
+  const postReinvestInvestors: DeploymentInvestor[] = [
+    { id: "A", name: "A", capital: 10_059, dateJoined: "2026-02-01" },
+    { id: "B", name: "B", capital: 10_021, dateJoined: "2026-03-01" },
+    { id: "C", name: "C", capital: 10_000, dateJoined: "2026-04-01" },
+  ];
+
+  const marPOCleared: DeploymentPO = {
+    ...marPO,
+    commissionsCleared: "2026-04-20",
+  };
+
+  const allCapitalEvents: CapitalEvent[] = [
+    { investorId: "A", date: "2026-04-05", delta: 40 },
+    { investorId: "A", date: "2026-04-20", delta: 19 },
+    { investorId: "B", date: "2026-04-20", delta: 21 },
+  ];
+
+  const { deployments } = calcSharedDeployments(
+    [febPO, marPOCleared, aprPO],
+    postReinvestInvestors,
+    allCapitalEvents,
+    "2026-03"
+  );
+  const mar = deployments.filter((d) => d.poId === "mar");
+  const byInvestor = Object.fromEntries(
+    mar.map((d) => [d.investorId, d.deployed])
+  );
+
+  assert.equal(
+    byInvestor.A,
+    473,
+    `Mar view should stay at A=473 after later reinvests, got ${byInvestor.A}`
+  );
+  assert.equal(
+    byInvestor.B,
+    527,
+    `Mar view should stay at B=527 after later reinvests, got ${byInvestor.B}`
+  );
+  console.log("✓ Past-month view is stable against later reinvests");
+}
+
 console.log("\nAll deployment tests passed.");
