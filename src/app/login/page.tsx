@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
-import { Command } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -134,12 +133,9 @@ export default function LoginPage() {
         <Card>
           <CardHeader className="text-center">
             <CardTitle className="flex justify-center">
-              <Command
-                className="text-brand-600"
-                size={36}
-                strokeWidth={1.5}
-                aria-label="BridgeConnect"
-              />
+              <span className="text-2xl font-semibold tracking-tight text-brand-600">
+                BridgeConnect
+              </span>
             </CardTitle>
             <CardDescription>
               {stage.kind === "password"
