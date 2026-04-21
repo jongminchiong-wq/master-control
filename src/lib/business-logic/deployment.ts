@@ -48,6 +48,15 @@ export interface Deployment {
   tierName: string;
   tierEmoji: string;
   cycleComplete: boolean;
+  // The "capital-committed" date for this deployment — used by the month
+  // filter to decide which view this deployment surfaces in. For Pass-1
+  // allocations this equals `po.poDate` (the deal's own date). For Pass-2
+  // backfills (late-joining investor filling a prior-month gap) this equals
+  // the investor's `dateJoined`, which is the month their money actually
+  // entered the pool. Optional so consumers that construct Deployment
+  // objects in tests or adapters still compile; the filter falls back to
+  // `poDate` when absent, preserving pre-deployedAt behaviour.
+  deployedAt?: string;
 }
 
 // ── Deployment calculation ──────────────────────────────────
@@ -74,14 +83,28 @@ export interface Deployment {
 // and a newer reinvest doesn't retroactively disturb past-month views.
 //
 // `remaining` reflects investors' idle capital as of end-of-selectedMonth.
-// Returned `deployments` are filtered to POs whose poDate is in selectedMonth,
-// so the UI table only shows allocations for the month being viewed. (Prior-
-// month deployments still influenced `remaining` — they just aren't surfaced
-// as rows.)
+// Returned `deployments` are filtered by each row's `deployedAt` (the date
+// the investor actually committed capital): Pass 1 uses po.poDate, Pass 2
+// uses inv.dateJoined. So the UI table shows allocations that were made
+// *during* the selected month, not just allocations against POs dated in
+// that month — this is what makes a March-joiner's backfill of a Feb PO
+// surface in March rather than vanishing. (Prior-month deployments still
+// influenced `remaining` — they just aren't re-surfaced in later months.)
 //
 // When `selectedMonth` is omitted, the function falls back to treating every
 // passed-in PO and capital event as in-scope for both allocation and display,
 // matching the original behaviour for callers that already scope their input.
+//
+// Pass 2 — backfill. After the chronological timeline finishes, any PO that
+// still has an unfunded gap AND is not fully cycle-complete (≥ one DO still
+// unpaid and commissions_cleared not set) is offered to investors with idle
+// capital, regardless of whether their dateJoined precedes the po.poDate.
+// Horizon still applies: an investor must have joined on or before horizon
+// to backfill. A PO with some DOs already buyer-paid is STILL eligible for
+// backfill (Option 2 semantics) — this accepts a small fairness cost (late
+// investor earns full tier rate on a deal where cashflow has partially
+// started) in exchange for day-to-day operational practicality (the user
+// needs to mark DOs paid as they come in without freezing the gap).
 
 const endOfMonth = (month: string): string => {
   // month is "YYYY-MM"; returns "YYYY-MM-31" which sorts correctly against any
@@ -284,15 +307,104 @@ export const calcSharedDeployments = (
         // Until both, the return hasn't flowed to the investor, so it stays
         // pending and introducer commission isn't credited.
         cycleComplete: !!(fullyPaid && po.commissionsCleared),
+        // Pass-1 allocation — committed on the PO's own date.
+        deployedAt: po.poDate,
       });
     }
   }
 
-  // If a selectedMonth was provided, only surface deployments for POs dated
-  // in that month. Prior-month deployments have already done their job of
-  // reducing `remaining` and now stay out of the UI.
+  // ── Pass 2: backfill active unfunded POs with leftover idle capital ───────
+  // A PO is "backfill-eligible" while not fully cycle-complete — at least one
+  // DO is still unpaid AND commissions_cleared is not set. This lets a late-
+  // joining investor fund the remaining gap on a PO even if some of its DOs
+  // have already been buyer-paid. Investors are gated only by horizon (not
+  // by po.poDate vs inv.dateJoined) so a historical month view stays stable:
+  // viewing February must not retroactively credit a March investor.
+  //
+  // POs are walked oldest-first, so remaining capital fills the earliest gap
+  // first. Pass 1 has already consumed what it could chronologically, so Pass
+  // 2 only sees POs where Pass 1 ran short on eligible capital at their time.
+  for (const po of sortedPOs) {
+    const poAmt = po.poAmount || 0;
+    if (poAmt <= 0) continue;
+
+    const fullyPaid =
+      po.dos && po.dos.length > 0 && po.dos.every((d) => d.buyerPaid);
+    if (fullyPaid || po.commissionsCleared) continue;
+
+    const allocsForPO = (deployedByPO[po.id] ||= []);
+    const alreadyDeployed = allocsForPO.reduce((s, a) => s + a.deployed, 0);
+    const unfunded = poAmt - alreadyDeployed;
+    if (unfunded <= 0) continue;
+
+    const backfillPool = investors.filter(
+      (inv) =>
+        inv.dateJoined &&
+        (!horizon || inv.dateJoined <= horizon) &&
+        (remaining[inv.id] || 0) > 0
+    );
+    const totalAvail = backfillPool.reduce(
+      (s, inv) => s + (remaining[inv.id] || 0),
+      0
+    );
+    if (totalAvail <= 0) continue;
+
+    const toFund = Math.min(unfunded, totalAvail);
+    let allocated = 0;
+
+    for (let idx = 0; idx < backfillPool.length; idx++) {
+      const inv = backfillPool[idx];
+      const avail = remaining[inv.id] || 0;
+      if (avail <= 0) continue;
+
+      const isLast = idx === backfillPool.length - 1;
+      const share = avail / totalAvail;
+      const deployed = isLast
+        ? Math.min(avail, toFund - allocated)
+        : Math.min(avail, Math.floor(share * toFund));
+      if (deployed <= 0) continue;
+
+      allocated += deployed;
+      remaining[inv.id] -= deployed;
+      allocsForPO.push({ investorId: inv.id, deployed });
+
+      const invTier = getTier(inv.capital, INV_TIERS);
+      const invReturnRate = invTier.rate;
+      const returnAmtTiered = deployed * (invReturnRate / 100);
+
+      deploymentsAll.push({
+        investorId: inv.id,
+        investorName: inv.name,
+        poId: po.id,
+        poRef: po.ref,
+        poDate: po.poDate,
+        poAmount: po.poAmount,
+        channel: po.channel,
+        deployed,
+        returnAmt: returnAmtTiered,
+        returnRate: invReturnRate,
+        tierName: invTier.name,
+        tierEmoji: "",
+        // Reached only when !fullyPaid && !commissionsCleared — cycle open.
+        cycleComplete: false,
+        // Pass-2 backfill — committed when this investor joined the pool,
+        // not when the PO was originally created. This surfaces the
+        // deployment in the investor's join-month UI view.
+        deployedAt: inv.dateJoined,
+      });
+    }
+  }
+
+  // If a selectedMonth was provided, only surface deployments committed
+  // during that month. "Committed" is the investor's capital-commit date:
+  //   Pass 1 → po.poDate (deal's own date, preserves original behaviour)
+  //   Pass 2 → inv.dateJoined (backfill surfaces in the late-joiner's month)
+  // Fallback to poDate keeps pre-deployedAt deployments (e.g. test fixtures)
+  // working identically to the original PO-month filter.
   const deployments = selectedMonth
-    ? deploymentsAll.filter((d) => monthOf(d.poDate) === selectedMonth)
+    ? deploymentsAll.filter(
+        (d) => monthOf(d.deployedAt ?? d.poDate) === selectedMonth
+      )
     : deploymentsAll;
 
   return { deployments, remaining };

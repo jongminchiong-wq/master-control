@@ -299,15 +299,22 @@ function InvestorsPageContent() {
     const now = new Date();
     const currentMonth =
       now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+    // Include both PO months and investor-join months. A late-joining
+    // investor (e.g. March) whose capital backfills a Feb PO needs March to
+    // appear in the dropdown so their deployment row surfaces under its
+    // deployedAt month.
     const months = [
-      ...new Set(allPOs.map((po) => getMonth(po.po_date)).filter(Boolean)),
+      ...new Set([
+        ...allPOs.map((po) => getMonth(po.po_date)),
+        ...investors.map((i) => getMonth(i.date_joined ?? "")),
+      ].filter(Boolean)),
     ]
       .sort()
       .reverse();
     if (!months.includes(currentMonth)) months.unshift(currentMonth);
     if (!months.includes(selectedMonth)) months.unshift(selectedMonth);
     return months;
-  }, [allPOs, selectedMonth]);
+  }, [allPOs, investors, selectedMonth]);
 
   const monthPOs = useMemo(
     () => allPOs.filter((po) => getMonth(po.po_date) === selectedMonth),

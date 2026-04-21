@@ -1,7 +1,9 @@
 // Deployment allocator tests — zero-dep, run with:
-//   node --experimental-strip-types src/lib/business-logic/__tests__/deployment.test.ts
-// (Node 22.6+). No test framework in the repo yet, so each test is a self-
-// describing assertion block that throws on failure.
+//   npx tsx src/lib/business-logic/__tests__/deployment.test.ts
+// tsx is used because the business-logic files use extensionless imports
+// that Node's strict ESM loader can't resolve on its own. No test framework
+// in the repo; each test is a self-describing assertion block that throws
+// on failure.
 
 import assert from "node:assert/strict";
 import {
@@ -243,6 +245,434 @@ const capitalEvents: CapitalEvent[] = [
     `Mar view should stay at B=527 after later reinvests, got ${byInvestor.B}`
   );
   console.log("✓ Past-month view is stable against later reinvests");
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// BACKFILL (Pass 2) TESTS — Option 2 semantics
+// ══════════════════════════════════════════════════════════════════════════
+// Shared fixture for the screenshot scenario: A and B each have RM 10,000,
+// joining one month apart. PRX-001 is RM 20,000 on 02-02 — A alone can't
+// cover it, so A funds 10k via Pass 1 and B may backfill the 10k gap
+// depending on the PO's state.
+//
+// Note on selectedMonth: the public `deployments` output is filtered by
+// monthOf(d.deployedAt ?? d.poDate) === selectedMonth. Pass 1 sets
+// deployedAt=po.poDate (original behaviour); Pass 2 sets deployedAt=
+// inv.dateJoined so a March-joiner's backfill of a Feb PO surfaces in the
+// March view. Tests 6–12 below use `undefined` selectedMonth to exercise
+// the unfiltered allocation correctness. Tests 13–14 cover the month-
+// scoping semantics end-to-end.
+
+const backfillInvestors: DeploymentInvestor[] = [
+  { id: "A", name: "A", capital: 10_000, dateJoined: "2026-02-01" },
+  { id: "B", name: "B", capital: 10_000, dateJoined: "2026-03-01" },
+];
+
+// ── Test 6: backfill PO with zero paid DOs ────────────────────────────────
+
+{
+  const po: DeploymentPO = {
+    id: "prx1",
+    ref: "PRX-001",
+    poDate: "2026-02-02",
+    poAmount: 20_000,
+    channel: "proxy",
+    dos: [], // no DOs → not fullyPaid
+    commissionsCleared: null,
+  };
+
+  const { deployments, remaining } = calcSharedDeployments(
+    [po],
+    backfillInvestors,
+    [],
+    // undefined selectedMonth → no filter, see every deployment
+  );
+  const byInvestor = Object.fromEntries(
+    deployments.map((d) => [d.investorId, d])
+  );
+
+  assert.equal(
+    byInvestor.A?.deployed,
+    10_000,
+    `A should fund 10k via Pass 1, got ${byInvestor.A?.deployed}`
+  );
+  assert.equal(
+    byInvestor.B?.deployed,
+    10_000,
+    `B should backfill 10k via Pass 2, got ${byInvestor.B?.deployed}`
+  );
+  assert.equal(
+    byInvestor.B?.returnRate,
+    4,
+    `B should earn Silver tier (4%), got ${byInvestor.B?.returnRate}`
+  );
+  assert.equal(
+    byInvestor.B?.cycleComplete,
+    false,
+    "B's backfill deployment must have cycleComplete=false"
+  );
+  assert.equal(
+    remaining.B,
+    0,
+    `B should have 0 remaining after backfill, got ${remaining.B}`
+  );
+  console.log("✓ Backfill fills gap when no DOs are buyer-paid");
+}
+
+// ── Test 7: backfill PO with SOME paid DOs (the Option-2 distinctive case) ─
+
+{
+  // 4 DOs × 5k. DO 1 buyer-paid on 02-20, DOs 2–4 still open. Under Option
+  // 1 (per-DO locking) this would block backfill entirely. Under Option 2
+  // (PO-level, lock only on full completion) B can still backfill.
+  const po: DeploymentPO = {
+    id: "prx1",
+    ref: "PRX-001",
+    poDate: "2026-02-02",
+    poAmount: 20_000,
+    channel: "proxy",
+    dos: [
+      { buyerPaid: "2026-02-20" },
+      { buyerPaid: null },
+      { buyerPaid: null },
+      { buyerPaid: null },
+    ],
+    commissionsCleared: null,
+  };
+
+  const { deployments, remaining } = calcSharedDeployments(
+    [po],
+    backfillInvestors,
+    []
+  );
+  const b = deployments.find((d) => d.investorId === "B");
+  assert.ok(
+    b,
+    "B must still backfill when only some DOs are buyer-paid (Option 2)"
+  );
+  assert.equal(
+    b!.deployed,
+    10_000,
+    `B should backfill full 10k gap, got ${b!.deployed}`
+  );
+  assert.equal(
+    remaining.B,
+    0,
+    "B's capital should be fully deployed via backfill"
+  );
+  console.log("✓ Backfill allowed when some DOs paid, cycle not fully complete");
+}
+
+// ── Test 8: no backfill on fully-paid PO ──────────────────────────────────
+
+{
+  const po: DeploymentPO = {
+    id: "prx1",
+    ref: "PRX-001",
+    poDate: "2026-02-02",
+    poAmount: 20_000,
+    channel: "proxy",
+    dos: [
+      { buyerPaid: "2026-02-20" },
+      { buyerPaid: "2026-02-22" },
+      { buyerPaid: "2026-02-25" },
+      { buyerPaid: "2026-02-28" },
+    ],
+    commissionsCleared: null,
+  };
+
+  const { deployments, remaining } = calcSharedDeployments(
+    [po],
+    backfillInvestors,
+    []
+  );
+  const b = deployments.find((d) => d.investorId === "B");
+  assert.equal(
+    b,
+    undefined,
+    "B must not backfill a PO where every DO is buyer-paid"
+  );
+  assert.equal(
+    remaining.B,
+    10_000,
+    `B's capital must stay idle, got ${remaining.B}`
+  );
+  console.log("✓ No backfill on fully-paid PO (all DOs buyer-paid)");
+}
+
+// ── Test 9: no backfill on commissions-cleared PO ─────────────────────────
+
+{
+  const po: DeploymentPO = {
+    id: "prx1",
+    ref: "PRX-001",
+    poDate: "2026-02-02",
+    poAmount: 20_000,
+    channel: "proxy",
+    dos: [
+      { buyerPaid: "2026-02-20" },
+      { buyerPaid: "2026-02-22" },
+      { buyerPaid: "2026-02-25" },
+      { buyerPaid: "2026-02-28" },
+    ],
+    commissionsCleared: "2026-03-01",
+  };
+
+  const { deployments, remaining } = calcSharedDeployments(
+    [po],
+    backfillInvestors,
+    []
+  );
+  const b = deployments.find((d) => d.investorId === "B");
+  assert.equal(
+    b,
+    undefined,
+    "B must not backfill a PO with commissions_cleared set"
+  );
+  assert.equal(remaining.B, 10_000, "B's capital must stay idle");
+  console.log("✓ No backfill on commissions-cleared PO");
+}
+
+// ── Test 10: horizon gates backfill ───────────────────────────────────────
+
+{
+  const po: DeploymentPO = {
+    id: "prx1",
+    ref: "PRX-001",
+    poDate: "2026-02-02",
+    poAmount: 20_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+
+  // Viewing 2026-02: horizon = 2026-02-31. B's dateJoined (2026-03-01) >
+  // horizon, so B must not participate in any deployment for this view.
+  const { deployments, remaining } = calcSharedDeployments(
+    [po],
+    backfillInvestors,
+    [],
+    "2026-02"
+  );
+  const bDep = deployments.find((d) => d.investorId === "B");
+  assert.equal(
+    bDep,
+    undefined,
+    "B must not backfill when view horizon is before B's join date"
+  );
+  const aDep = deployments.find((d) => d.investorId === "A");
+  assert.equal(
+    aDep?.deployed,
+    10_000,
+    `A should still fund 10k in Feb view, got ${aDep?.deployed}`
+  );
+  assert.equal(
+    remaining.B,
+    10_000,
+    `B's capital must remain full in Feb horizon, got ${remaining.B}`
+  );
+  assert.equal(remaining.A, 0, "A fully deployed in Feb");
+  console.log("✓ Horizon gate blocks backfill for not-yet-joined investors");
+}
+
+// ── Test 11: chronological priority preserved ─────────────────────────────
+// PRX-001 (02-02) 20k with only A eligible chronologically → 10k gap.
+// PRX-002 (03-02) 5k with A and B eligible. B's 10k should fund PRX-002
+// first (chronological Pass 1), then backfill 5k of PRX-001 via Pass 2.
+// A gets exhausted on PRX-001 in Pass 1 (10k of 20k), then has 0 for PRX-002.
+
+{
+  const po1: DeploymentPO = {
+    id: "prx1",
+    ref: "PRX-001",
+    poDate: "2026-02-02",
+    poAmount: 20_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+  const po2: DeploymentPO = {
+    id: "prx2",
+    ref: "PRX-002",
+    poDate: "2026-03-02",
+    poAmount: 5_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+
+  const { deployments, remaining } = calcSharedDeployments(
+    [po1, po2],
+    backfillInvestors,
+    []
+  );
+  const po1Deps = deployments.filter((d) => d.poId === "prx1");
+  const po2Deps = deployments.filter((d) => d.poId === "prx2");
+  const sumBy = (deps: typeof deployments, key: string) =>
+    deps.filter((d) => d.investorId === key).reduce((s, d) => s + d.deployed, 0);
+
+  assert.equal(sumBy(po1Deps, "A"), 10_000, "A funds 10k of PRX-001 (Pass 1)");
+  assert.equal(
+    sumBy(po2Deps, "B"),
+    5_000,
+    "B funds full 5k of PRX-002 chronologically (Pass 1), before backfill"
+  );
+  assert.equal(
+    sumBy(po1Deps, "B"),
+    5_000,
+    "B backfills remaining 5k of PRX-001 with leftover capital (Pass 2)"
+  );
+  assert.equal(remaining.A, 0, "A fully deployed");
+  assert.equal(remaining.B, 0, "B fully deployed (5k Pass 1 + 5k Pass 2)");
+  console.log("✓ Chronological priority: new POs consume capital before backfill");
+}
+
+// ── Test 12: no double-allocation when Pass 1 already fully funded ────────
+
+{
+  // Both investors eligible at PO date (joined 02-01) — Pass 1 fully funds
+  // (10k + 10k = 20k) so Pass 2 must be a no-op.
+  const twoEarlyInvestors: DeploymentInvestor[] = [
+    { id: "A", name: "A", capital: 10_000, dateJoined: "2026-02-01" },
+    { id: "B", name: "B", capital: 10_000, dateJoined: "2026-02-01" },
+  ];
+  const po: DeploymentPO = {
+    id: "prx1",
+    ref: "PRX-001",
+    poDate: "2026-02-02",
+    poAmount: 20_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+
+  const { deployments, remaining } = calcSharedDeployments(
+    [po],
+    twoEarlyInvestors,
+    []
+  );
+  // Expect exactly 2 deployments (no Pass-2 duplicates).
+  assert.equal(
+    deployments.length,
+    2,
+    `Expected 2 deployments, got ${deployments.length} — Pass 2 may have double-allocated`
+  );
+  assert.equal(remaining.A, 0);
+  assert.equal(remaining.B, 0);
+  console.log("✓ Pass 2 is a no-op when PO is fully funded by Pass 1");
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Phase 2: deployedAt field & month-scoping semantics
+// ══════════════════════════════════════════════════════════════════════════
+
+// ── Test 13: backfill surfaces in the joiner's month view ─────────────────
+// The key UX fix: B joins in March and backfills a Feb PO. The deployment
+// row must appear in March's deployments array (so Investors/Portfolio UI
+// reports B as 10k deployed / 0 idle), while A's Pass-1 allocation from
+// Feb stays out of March view (historical stability).
+
+{
+  const po: DeploymentPO = {
+    id: "prx1",
+    ref: "PRX-001",
+    poDate: "2026-02-02",
+    poAmount: 20_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+
+  const { deployments, remaining } = calcSharedDeployments(
+    [po],
+    backfillInvestors,
+    [],
+    "2026-03"
+  );
+
+  // A's Pass-1 on Feb PO has deployedAt=2026-02-02 → out of March view.
+  const aInView = deployments.find((d) => d.investorId === "A");
+  assert.equal(
+    aInView,
+    undefined,
+    "A's Pass-1 deployment from Feb must not appear in March view"
+  );
+
+  // B's backfill has deployedAt=2026-03-01 → shows in March view.
+  const bInView = deployments.find((d) => d.investorId === "B");
+  assert.ok(bInView, "B's backfill deployment must appear in March view");
+  assert.equal(
+    bInView!.deployed,
+    10_000,
+    `B's deployed should be 10k, got ${bInView!.deployed}`
+  );
+  assert.equal(
+    bInView!.poId,
+    "prx1",
+    `B's deployment should reference PRX-001, got ${bInView!.poId}`
+  );
+  assert.equal(
+    bInView!.deployedAt,
+    "2026-03-01",
+    `B's deployedAt should match B.dateJoined, got ${bInView!.deployedAt}`
+  );
+  assert.equal(
+    deployments.length,
+    1,
+    `March view should contain only B's backfill, got ${deployments.length}`
+  );
+
+  // Allocator state — unchanged from Phase 1. Pass 2 still consumed B's capital.
+  assert.equal(
+    remaining.B,
+    0,
+    `B should have 0 remaining after backfill, got ${remaining.B}`
+  );
+  assert.equal(
+    remaining.A,
+    0,
+    `A should have 0 remaining (fully deployed in Feb), got ${remaining.A}`
+  );
+  console.log("✓ Backfill surfaces in the joiner's month view via deployedAt");
+}
+
+// ── Test 14: Pass-1 month-stability preserved ─────────────────────────────
+// Guards against accidentally shifting Pass-1 visibility. A chronological
+// allocation should still appear in the PO's own month, not anywhere else.
+
+{
+  const onlyA: DeploymentInvestor[] = [
+    { id: "A", name: "A", capital: 10_000, dateJoined: "2026-02-01" },
+  ];
+  const po: DeploymentPO = {
+    id: "prx1",
+    ref: "PRX-001",
+    poDate: "2026-02-02",
+    poAmount: 10_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+
+  const febView = calcSharedDeployments([po], onlyA, [], "2026-02");
+  assert.equal(
+    febView.deployments.length,
+    1,
+    `Feb view should show A's deployment, got ${febView.deployments.length}`
+  );
+  assert.equal(
+    febView.deployments[0].deployedAt,
+    "2026-02-02",
+    `Pass-1 deployedAt should equal po.poDate, got ${febView.deployments[0].deployedAt}`
+  );
+
+  const marView = calcSharedDeployments([po], onlyA, [], "2026-03");
+  assert.equal(
+    marView.deployments.length,
+    0,
+    `March view should be empty for a Feb PO with no backfill, got ${marView.deployments.length}`
+  );
+  console.log("✓ Pass-1 allocation still scopes to the PO's own month");
 }
 
 console.log("\nAll deployment tests passed.");

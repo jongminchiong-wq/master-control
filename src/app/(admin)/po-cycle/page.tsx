@@ -211,6 +211,10 @@ function POCyclePageContent() {
   // Data state
   const [players, setPlayers] = useState<DBPlayer[]>([]);
   const [allPOs, setAllPOs] = useState<DBPO[]>([]);
+  // Investor join dates — used only to widen the month-picker so a late
+  // joiner's backfill month (which may have no PO originated in it) is
+  // selectable. We don't need the full investor records here.
+  const [investorJoinDates, setInvestorJoinDates] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   // UI state
@@ -250,7 +254,7 @@ function POCyclePageContent() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [playersRes, posRes] = await Promise.all([
+    const [playersRes, posRes, investorsRes] = await Promise.all([
       supabase
         .from("players")
         .select("*")
@@ -259,9 +263,17 @@ function POCyclePageContent() {
         .from("purchase_orders")
         .select("*, delivery_orders(*)")
         .order("po_date", { ascending: false }),
+      supabase.from("investors").select("date_joined"),
     ]);
     if (playersRes.data) setPlayers(playersRes.data);
     if (posRes.data) setAllPOs(posRes.data as DBPO[]);
+    if (investorsRes.data) {
+      setInvestorJoinDates(
+        investorsRes.data
+          .map((i) => i.date_joined)
+          .filter((d): d is string => !!d)
+      );
+    }
     setLoading(false);
   }, [supabase]);
 
@@ -275,15 +287,21 @@ function POCyclePageContent() {
     const now = new Date();
     const currentMonth =
       now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+    // Include both PO months and investor-join months so the picker offers
+    // months where a backfill deployment would surface (deployedAt =
+    // inv.dateJoined) even if no PO originated in that month.
     const months = [
-      ...new Set(allPOs.map((po) => getMonth(po.po_date)).filter(Boolean)),
+      ...new Set([
+        ...allPOs.map((po) => getMonth(po.po_date)),
+        ...investorJoinDates.map((d) => getMonth(d)),
+      ].filter(Boolean)),
     ]
       .sort()
       .reverse();
     if (!months.includes(currentMonth)) months.unshift(currentMonth);
     if (!months.includes(selectedMonth)) months.unshift(selectedMonth);
     return months;
-  }, [allPOs, selectedMonth]);
+  }, [allPOs, investorJoinDates, selectedMonth]);
 
   const monthPOs = useMemo(
     () => allPOs.filter((po) => getMonth(po.po_date) === selectedMonth),

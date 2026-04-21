@@ -272,14 +272,20 @@ export default function InvestorDashboardPage() {
   // ── Computed: month list ──────────────────────────────────
 
   const availableMonths = useMemo(() => {
+    // Include both PO months and investor-join months. A March-joining
+    // investor backfilling a Feb PO needs March in the dropdown so their
+    // deployment row (deployedAt = dateJoined) can be viewed.
     const months = [
-      ...new Set(allPOs.map((po) => getMonth(po.po_date)).filter(Boolean)),
+      ...new Set([
+        ...allPOs.map((po) => getMonth(po.po_date)),
+        ...allInvestors.map((i) => getMonth(i.date_joined ?? "")),
+      ].filter(Boolean)),
     ]
       .sort()
       .reverse();
     if (!months.includes(currentMonth)) months.unshift(currentMonth);
     return months;
-  }, [allPOs, currentMonth]);
+  }, [allPOs, allInvestors, currentMonth]);
 
   // ── Computed: deployments for selected month ──────────────
 

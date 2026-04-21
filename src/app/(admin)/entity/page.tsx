@@ -348,15 +348,21 @@ function EntityPageContent() {
     const now = new Date();
     const currentMonth =
       now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+    // Include both PO months and investor-join months so the month picker
+    // surfaces months where a late-joining investor's backfill appears
+    // (their deployedAt = dateJoined), even if no PO originated that month.
     const months = [
-      ...new Set(allPOs.map((po) => getMonth(po.po_date)).filter(Boolean)),
+      ...new Set([
+        ...allPOs.map((po) => getMonth(po.po_date)),
+        ...investors.map((i) => getMonth(i.date_joined ?? "")),
+      ].filter(Boolean)),
     ]
       .sort()
       .reverse();
     if (!months.includes(currentMonth)) months.unshift(currentMonth);
     if (!months.includes(selectedMonth)) months.unshift(selectedMonth);
     return months;
-  }, [allPOs, selectedMonth]);
+  }, [allPOs, investors, selectedMonth]);
 
   // ── Map DB rows to business-logic types ──────────────────
 
