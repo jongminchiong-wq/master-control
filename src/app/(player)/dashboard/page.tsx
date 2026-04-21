@@ -405,13 +405,25 @@ export default function PlayerDashboardPage() {
   // ── Computed: month list ──────────────────────────────────
 
   const availableMonths = useMemo(() => {
-    const months = [
-      ...new Set(allPOs.map((po) => getMonth(po.po_date)).filter(Boolean)),
-    ]
-      .sort()
-      .reverse();
-    if (!months.includes(currentMonth)) months.unshift(currentMonth);
-    return months;
+    const poMonths = allPOs
+      .map((po) => getMonth(po.po_date))
+      .filter((m): m is string => Boolean(m));
+    const anchors = [...poMonths, currentMonth];
+    const earliest = anchors.reduce((a, b) => (a < b ? a : b));
+    const latest = anchors.reduce((a, b) => (a > b ? a : b));
+
+    const months: string[] = [];
+    let [y, m] = earliest.split("-").map(Number);
+    const [ly, lm] = latest.split("-").map(Number);
+    while (y < ly || (y === ly && m <= lm)) {
+      months.push(`${y}-${String(m).padStart(2, "0")}`);
+      m++;
+      if (m > 12) {
+        m = 1;
+        y++;
+      }
+    }
+    return months.reverse();
   }, [allPOs, currentMonth]);
 
   // ── Computed: waterfall-ready data ────────────────────────
