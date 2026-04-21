@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -248,24 +247,6 @@ export default function LoginPage() {
                 </button>
               </form>
             )}
-
-            <p className="mt-4 text-center text-xs leading-relaxed text-gray-500">
-              By signing in, you agree to our{" "}
-              <Link
-                href="/legal/privacy"
-                className="text-brand-600 hover:underline"
-              >
-                Privacy Notice
-              </Link>
-              {" "}and{" "}
-              <Link
-                href="/legal/disclosures"
-                className="text-brand-600 hover:underline"
-              >
-                Disclosures
-              </Link>
-              .
-            </p>
           </CardContent>
         </Card>
       </div>
