@@ -13,11 +13,10 @@ import {
   calcSharedDeployments,
   type DeploymentPO,
   type DeploymentInvestor,
-  type Deployment,
   type CapitalEvent,
 } from "@/lib/business-logic/deployment";
 import { calcFundingStatus } from "@/lib/business-logic/funding-status";
-import { fmt, getMonth, fmtMonth } from "@/lib/business-logic/formatters";
+import { fmt } from "@/lib/business-logic/formatters";
 import {
   shouldAutoCompound,
   daysUntilCompound,
@@ -28,8 +27,6 @@ import {
 
 // Shared components
 import { TierCard } from "@/components/tier-card";
-import { ChannelBadge } from "@/components/channel-badge";
-import { MonthPicker } from "@/components/month-picker";
 import { FundingOpportunities } from "@/components/funding-opportunities";
 
 // UI components
@@ -81,6 +78,7 @@ type DBPO = Tables<"purchase_orders"> & {
   delivery_orders: Tables<"delivery_orders">[];
 };
 type DBCompoundLog = Tables<"compound_log">;
+type DBDeposit = Tables<"deposits">;
 
 // ── DB → Business-logic mappers ─────────────────────────────
 
@@ -148,6 +146,7 @@ export default function InvestorDashboardPage() {
   const [allInvestors, setAllInvestors] = useState<DBInvestor[]>([]);
   const [allPOs, setAllPOs] = useState<DBPO[]>([]);
   const [compoundLogs, setCompoundLogs] = useState<DBCompoundLog[]>([]);
+  const [deposits, setDeposits] = useState<DBDeposit[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorState, setErrorState] = useState<
     "not_authenticated" | "no_investor" | null
@@ -172,12 +171,6 @@ export default function InvestorDashboardPage() {
 
   // Withdrawal history
   const [myWithdrawals, setMyWithdrawals] = useState<DBWithdrawal[]>([]);
-
-  // Month selector
-  const now = new Date();
-  const currentMonth =
-    now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
-  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
 
   // ── Data fetching ─────────────────────────────────────────
 
@@ -208,8 +201,14 @@ export default function InvestorDashboardPage() {
 
     setMyInvestor(investorData);
 
-    const [investorsRes, posRes, withdrawalsRes, ledgerRes, compoundLogRes] =
-      await Promise.all([
+    const [
+      investorsRes,
+      posRes,
+      withdrawalsRes,
+      ledgerRes,
+      compoundLogRes,
+      depositsRes,
+    ] = await Promise.all([
         supabase
           .from("investors")
           .select("*")
@@ -235,6 +234,12 @@ export default function InvestorDashboardPage() {
           .from("compound_log")
           .select("*")
           .order("created_at", { ascending: true }),
+        // All investors' deposits for the same reason. RLS must allow
+        // investors to read sibling deposit rows.
+        supabase
+          .from("deposits")
+          .select("*")
+          .order("deposited_at", { ascending: true }),
       ]);
 
     if (investorsRes.data) setAllInvestors(investorsRes.data);
@@ -242,6 +247,7 @@ export default function InvestorDashboardPage() {
     if (withdrawalsRes.data) setMyWithdrawals(withdrawalsRes.data);
     if (ledgerRes.data) setMyLedger(ledgerRes.data);
     if (compoundLogRes.data) setCompoundLogs(compoundLogRes.data);
+    if (depositsRes.data) setDeposits(depositsRes.data);
 
     // Auto-compound on read: if compound window has passed, compound automatically
     if (
@@ -269,37 +275,14 @@ export default function InvestorDashboardPage() {
     fetchData();
   }, [fetchData]);
 
-  // ── Computed: month list ──────────────────────────────────
-
-  const availableMonths = useMemo(() => {
-    // Include both PO months and investor-join months. A March-joining
-    // investor backfilling a Feb PO needs March in the dropdown so their
-    // deployment row (deployedAt = dateJoined) can be viewed.
-    const months = [
-      ...new Set([
-        ...allPOs.map((po) => getMonth(po.po_date)),
-        ...allInvestors.map((i) => getMonth(i.date_joined ?? "")),
-      ].filter(Boolean)),
-    ]
-      .sort()
-      .reverse();
-    if (!months.includes(currentMonth)) months.unshift(currentMonth);
-    return months;
-  }, [allPOs, allInvestors, currentMonth]);
-
-  // ── Computed: deployments for selected month ──────────────
-
-  // POs whose po_date is on or before the selected month — the allocator
-  // walks this pool so prior-month deployments that are still locking
-  // capital are respected when computing end-of-month idle.
-  const poolPOs = useMemo(
-    () => allPOs.filter((po) => getMonth(po.po_date) <= selectedMonth),
-    [allPOs, selectedMonth]
-  );
+  // ── Computed: deployments (all-time) ──────────────────────
+  // The investor dashboard shows a cumulative snapshot — no month scope.
+  // Every PO feeds the allocator so prior-month deployments that are still
+  // locking capital are respected in "idle" and "deployed".
 
   const deploymentPOs = useMemo(
-    () => poolPOs.map(toDeploymentPO),
-    [poolPOs]
+    () => allPOs.map(toDeploymentPO),
+    [allPOs]
   );
 
   const deploymentInvestors = useMemo(
@@ -307,19 +290,27 @@ export default function InvestorDashboardPage() {
     [allInvestors]
   );
 
-  // Capital-change events from compound_log. The allocator uses these to
-  // defer reinvested returns to their actual date instead of baking them
-  // into every historical PO's allocation.
+  // Capital-change events from both compound_log (reinvests) and deposits.
+  // The allocator needs deposits as timeline events too — without them, a
+  // late deposit would retroactively fund an earlier PO (time-travel).
   const capitalEvents = useMemo<CapitalEvent[]>(
-    () =>
-      compoundLogs
+    () => [
+      ...compoundLogs
         .filter((log) => log.created_at)
         .map((log) => ({
           investorId: log.investor_id,
           date: (log.created_at as string).slice(0, 10),
           delta: log.capital_after - log.capital_before,
         })),
-    [compoundLogs]
+      ...deposits
+        .filter((d) => d.deposited_at && d.investor_id)
+        .map((d) => ({
+          investorId: d.investor_id,
+          date: d.deposited_at,
+          delta: Number(d.amount),
+        })),
+    ],
+    [compoundLogs, deposits]
   );
 
   const { deployments: allDeployments, remaining } = useMemo(
@@ -327,19 +318,27 @@ export default function InvestorDashboardPage() {
       calcSharedDeployments(
         deploymentPOs,
         deploymentInvestors,
-        capitalEvents,
-        selectedMonth
+        capitalEvents
       ),
-    [deploymentPOs, deploymentInvestors, capitalEvents, selectedMonth]
+    [deploymentPOs, deploymentInvestors, capitalEvents]
   );
 
   // ── Computed: platform funding status (pool-wide) ─────────
-  // Aggregates demand vs pool capacity across the selected month. Drives
-  // the platform funding gauge shown below the hero.
+  // Only backfill-eligible POs count as "funding opportunities" — mirrors
+  // Pass-2 backfill rules in calcSharedDeployments. Without this filter, a
+  // historically closed PO that happened to be short-funded at cycle close
+  // would leak into the card as a ghost entry.
 
-  const monthDeploymentPOs = useMemo(
-    () => deploymentPOs.filter((po) => getMonth(po.poDate) === selectedMonth),
-    [deploymentPOs, selectedMonth]
+  const backfillEligiblePOs = useMemo(
+    () =>
+      deploymentPOs.filter((po) => {
+        const fullyPaid =
+          !!po.dos &&
+          po.dos.length > 0 &&
+          po.dos.every((d) => !!d.buyerPaid);
+        return !fullyPaid && !po.commissionsCleared;
+      }),
+    [deploymentPOs]
   );
 
   const asOfDate = useMemo(() => {
@@ -356,13 +355,13 @@ export default function InvestorDashboardPage() {
   const fundingStatus = useMemo(
     () =>
       calcFundingStatus({
-        monthPOs: monthDeploymentPOs,
+        monthPOs: backfillEligiblePOs,
         deployments: allDeployments,
         investors: deploymentInvestors,
         remaining,
         asOfDate,
       }),
-    [monthDeploymentPOs, allDeployments, deploymentInvestors, remaining, asOfDate]
+    [backfillEligiblePOs, allDeployments, deploymentInvestors, remaining, asOfDate]
   );
 
   // ── Computed: my deployments ──────────────────────────────
@@ -380,17 +379,18 @@ export default function InvestorDashboardPage() {
   );
 
   // ── Computed: deployment stats ────────────────────────────
-  // Idle comes from the allocator's `remaining` (reflects prior-month POs
-  // still in flight). Deployed is capital minus idle — this can exceed the
-  // sum of myDeployments[].deployed when capital is still locked from a
-  // prior month that isn't displayed in the current month's table.
+  // Idle comes from the allocator's `remaining` after walking every PO.
+  // Deployed is live capital minus idle — captures open deployments
+  // across any month still locking capital.
+
+  const myCapital = myInvestor?.capital ?? 0;
 
   const idle = useMemo(() => {
     if (!myInvestor) return 0;
-    return Math.max(0, remaining[myInvestor.id] ?? myInvestor.capital);
-  }, [myInvestor, remaining]);
+    return Math.max(0, remaining[myInvestor.id] ?? myCapital);
+  }, [myInvestor, remaining, myCapital]);
 
-  const totalDeployed = myInvestor ? myInvestor.capital - idle : 0;
+  const totalDeployed = myInvestor ? Math.max(0, myCapital - idle) : 0;
 
   const completedDeps = useMemo(
     () => myDeployments.filter((d) => d.cycleComplete),
@@ -406,8 +406,8 @@ export default function InvestorDashboardPage() {
   const pendingReturns = activeDeps.reduce((s, d) => s + d.returnAmt, 0);
 
   const utilisationPct =
-    myInvestor && myInvestor.capital > 0
-      ? ((totalDeployed / myInvestor.capital) * 100).toFixed(0)
+    myInvestor && myCapital > 0
+      ? ((totalDeployed / myCapital) * 100).toFixed(0)
       : "0";
 
   // ── Computed: introducer earnings ─────────────────────────
@@ -573,7 +573,7 @@ export default function InvestorDashboardPage() {
 
   return (
     <div className="space-y-5">
-      {/* Header + Month Picker */}
+      {/* Header */}
       <div className="flex items-center justify-end gap-3">
         <button
           type="button"
@@ -583,12 +583,6 @@ export default function InvestorDashboardPage() {
           <History className="size-3.5" />
           Capital history
         </button>
-        <MonthPicker
-          months={availableMonths}
-          value={selectedMonth}
-          onChange={setSelectedMonth}
-          color="brand"
-        />
       </div>
 
       {/* ═══ HERO SECTION ═══ */}
@@ -601,14 +595,14 @@ export default function InvestorDashboardPage() {
             </p>
             {totalReturns > 0 && (
               <p className="mt-2 font-mono text-sm font-medium text-success-600">
-                +{fmt(totalReturns)} earned this month
+                +{fmt(totalReturns)} total returns earned
               </p>
             )}
           </div>
         </div>
 
-        {/* Utilisation bar inside hero */}
-        {myInvestor.capital > 0 && (
+        {/* Utilisation bar — all-time snapshot of live capital */}
+        {myCapital > 0 && (
           <div className="mt-6">
             <div className="mb-2 flex items-baseline justify-between">
               <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
@@ -622,14 +616,14 @@ export default function InvestorDashboardPage() {
               <div
                 className="rounded-md bg-brand-400 transition-all"
                 style={{
-                  width: `${(totalDeployed / myInvestor.capital) * 100}%`,
+                  width: `${(totalDeployed / myCapital) * 100}%`,
                 }}
               />
               {idle > 0 && (
                 <div
                   className="rounded-md bg-gray-200"
                   style={{
-                    width: `${(idle / myInvestor.capital) * 100}%`,
+                    width: `${(idle / myCapital) * 100}%`,
                   }}
                 />
               )}
@@ -889,20 +883,16 @@ export default function InvestorDashboardPage() {
           <div className="max-h-[65vh] overflow-y-auto">
             {myDeployments.length === 0 ? (
               <p className="py-12 text-center text-xs text-gray-500">
-                No deployments this month.
+                No deployments yet.
               </p>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="text-[10px]">PO Ref</TableHead>
-                    <TableHead className="text-[10px]">Channel</TableHead>
                     <TableHead className="text-[10px]">PO Date</TableHead>
                     <TableHead className="text-right text-[10px]">
                       Deployed
-                    </TableHead>
-                    <TableHead className="text-right text-[10px]">
-                      Return
                     </TableHead>
                     <TableHead className="text-[10px]">Status</TableHead>
                   </TableRow>
@@ -920,19 +910,11 @@ export default function InvestorDashboardPage() {
                       >
                         {dep.poRef}
                       </TableCell>
-                      <TableCell>
-                        <ChannelBadge
-                          channel={dep.channel as "punchout" | "gep"}
-                        />
-                      </TableCell>
                       <TableCell className="text-xs text-gray-500">
                         {dep.poDate}
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs font-medium text-brand-600">
                         {fmt(dep.deployed)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs font-medium text-accent-600">
-                        +{fmt(dep.returnAmt)}
                       </TableCell>
                       <TableCell>
                         <CycleStatusBadge
@@ -943,16 +925,13 @@ export default function InvestorDashboardPage() {
                   ))}
                   <TableRow className="border-t-2 border-gray-300">
                     <TableCell
-                      colSpan={3}
+                      colSpan={2}
                       className="text-xs font-medium text-gray-800"
                     >
                       Total
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs font-medium text-brand-600">
                       {fmt(totalDeployed)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-xs font-medium text-accent-600">
-                      +{fmt(totalReturns + pendingReturns)}
                     </TableCell>
                     <TableCell />
                   </TableRow>
@@ -1028,13 +1007,7 @@ export default function InvestorDashboardPage() {
                     <TableHead className="text-[10px]">#</TableHead>
                     <TableHead className="text-[10px]">PO Ref</TableHead>
                     <TableHead className="text-right text-[10px]">
-                      Capital Out
-                    </TableHead>
-                    <TableHead className="text-right text-[10px]">
                       Return
-                    </TableHead>
-                    <TableHead className="text-right text-[10px]">
-                      Net
                     </TableHead>
                     <TableHead className="text-[10px]">Status</TableHead>
                   </TableRow>
@@ -1055,14 +1028,8 @@ export default function InvestorDashboardPage() {
                       >
                         {dep.poRef}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-xs">
-                        {fmt(dep.deployed)}
-                      </TableCell>
                       <TableCell className="text-right font-mono text-xs font-medium text-accent-600">
                         +{fmt(dep.returnAmt)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs font-medium text-success-600">
-                        {fmt(dep.deployed + dep.returnAmt)}
                       </TableCell>
                       <TableCell>
                         <CycleStatusBadge

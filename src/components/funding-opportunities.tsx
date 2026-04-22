@@ -1,7 +1,6 @@
 import { Sparkles, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmt } from "@/lib/business-logic/formatters";
-import { ChannelBadge } from "@/components/channel-badge";
 import { Button } from "@/components/ui/button";
 import type { FundingStatus } from "@/lib/business-logic/funding-status";
 
@@ -55,7 +54,7 @@ export function FundingOpportunities({
               Funding Opportunities
             </p>
             <p className="mt-0.5 text-xs text-gray-500">
-              POs waiting for pool capital this month
+              POs waiting for pool capital
             </p>
           </div>
         </div>
@@ -82,17 +81,14 @@ export function FundingOpportunities({
               key={po.poId}
               className="grid grid-cols-[auto_1fr_1fr_auto] items-center gap-5 border-b border-gray-100 py-4 last:border-b-0"
             >
-              <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    "font-mono text-sm font-medium",
-                    po.channel === "gep" ? "text-brand-600" : "text-accent-600"
-                  )}
-                >
-                  {po.ref}
-                </span>
-                <ChannelBadge channel={po.channel as "punchout" | "gep"} />
-              </div>
+              <span
+                className={cn(
+                  "font-mono text-sm font-medium",
+                  po.channel === "gep" ? "text-brand-600" : "text-accent-600"
+                )}
+              >
+                {po.ref}
+              </span>
               <div>
                 <p className="font-mono text-sm font-medium text-gray-800">
                   {fmt(po.unfunded)}

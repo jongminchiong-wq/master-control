@@ -56,6 +56,7 @@ type DBPO = Tables<"purchase_orders"> & {
 };
 type DBOpex = Tables<"opex">;
 type DBCompoundLog = Tables<"compound_log">;
+type DBDeposit = Tables<"deposits">;
 
 // ── DB → Business-logic mappers ────────────────────────────
 
@@ -214,6 +215,7 @@ function EntityPageContent() {
   const [investors, setInvestors] = useState<DBInvestor[]>([]);
   const [allPOs, setAllPOs] = useState<DBPO[]>([]);
   const [compoundLogs, setCompoundLogs] = useState<DBCompoundLog[]>([]);
+  const [deposits, setDeposits] = useState<DBDeposit[]>([]);
   const [opex, setOpex] = useState<DBOpex | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -248,7 +250,7 @@ function EntityPageContent() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [playersRes, investorsRes, posRes, compoundLogRes] =
+    const [playersRes, investorsRes, posRes, compoundLogRes, depositsRes] =
       await Promise.all([
         supabase
           .from("players")
@@ -266,11 +268,16 @@ function EntityPageContent() {
           .from("compound_log")
           .select("*")
           .order("created_at", { ascending: true }),
+        supabase
+          .from("deposits")
+          .select("*")
+          .order("deposited_at", { ascending: true }),
       ]);
     if (playersRes.data) setPlayers(playersRes.data);
     if (investorsRes.data) setInvestors(investorsRes.data);
     if (posRes.data) setAllPOs(posRes.data as DBPO[]);
     if (compoundLogRes.data) setCompoundLogs(compoundLogRes.data);
+    if (depositsRes.data) setDeposits(depositsRes.data);
     setLoading(false);
   }, [supabase]);
 
@@ -392,18 +399,28 @@ function EntityPageContent() {
     [allPOs, selectedMonth]
   );
 
-  // Capital-change events from compound_log — prevents reinvested returns
-  // from retroactively inflating allocations on POs dated before the reinvest.
+  // Capital-change events from both compound_log (reinvests) and deposits.
+  // Deposits are timeline events too — they gate which POs can see which
+  // capital. Without this, a late deposit would retroactively fund an earlier
+  // PO (the money would time-travel).
   const capitalEvents = useMemo<CapitalEvent[]>(
-    () =>
-      compoundLogs
+    () => [
+      ...compoundLogs
         .filter((log) => log.created_at)
         .map((log) => ({
           investorId: log.investor_id,
           date: (log.created_at as string).slice(0, 10),
           delta: log.capital_after - log.capital_before,
         })),
-    [compoundLogs]
+      ...deposits
+        .filter((d) => d.deposited_at && d.investor_id)
+        .map((d) => ({
+          investorId: d.investor_id,
+          date: d.deposited_at,
+          delta: Number(d.amount),
+        })),
+    ],
+    [compoundLogs, deposits]
   );
 
   // ── Deployment calculations ──────────────────────────────

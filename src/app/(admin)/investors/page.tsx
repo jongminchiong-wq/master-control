@@ -65,6 +65,7 @@ type DBInvestor = Tables<"investors">;
 type DBWithdrawal = Tables<"withdrawals">;
 type DBReturnCredit = Tables<"return_credits">;
 type DBCompoundLog = Tables<"compound_log">;
+type DBDeposit = Tables<"deposits">;
 type DBPO = Tables<"purchase_orders"> & {
   delivery_orders: Tables<"delivery_orders">[];
 };
@@ -108,17 +109,21 @@ interface InvestorStats {
 
 function getInvestorStats(
   invId: string,
-  capital: number,
+  capitalAtHorizon: number,
   deployments: Deployment[],
   remaining: Record<string, number>
 ): InvestorStats {
   const invDeps = deployments.filter((d) => d.investorId === invId);
-  const totalDeployed = invDeps.reduce((s, d) => s + d.deployed, 0);
   const completedDeps = invDeps.filter((d) => d.cycleComplete);
   const activeDeps = invDeps.filter((d) => !d.cycleComplete);
   const totalReturns = completedDeps.reduce((s, d) => s + d.returnAmt, 0);
   const pendingReturns = activeDeps.reduce((s, d) => s + d.returnAmt, 0);
-  const idle = remaining[invId] ?? capital - totalDeployed;
+  // Idle is the allocator's `remaining` for this investor at horizon end.
+  // Deployed is "capital actually in play at horizon" minus idle — this
+  // captures open deployments from prior months still locking capital, not
+  // just rows committed in the selected month.
+  const idle = Math.max(0, remaining[invId] ?? capitalAtHorizon);
+  const totalDeployed = Math.max(0, capitalAtHorizon - idle);
 
   return {
     totalDeployed,
@@ -204,6 +209,7 @@ function InvestorsPageContent() {
   const [withdrawals, setWithdrawals] = useState<DBWithdrawal[]>([]);
   const [returnCredits, setReturnCredits] = useState<DBReturnCredit[]>([]);
   const [compoundLogs, setCompoundLogs] = useState<DBCompoundLog[]>([]);
+  const [deposits, setDeposits] = useState<DBDeposit[]>([]);
   const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -257,6 +263,7 @@ function InvestorsPageContent() {
       creditsRes,
       ledgerRes,
       compoundLogRes,
+      depositsRes,
     ] = await Promise.all([
       supabase
         .from("investors")
@@ -279,6 +286,10 @@ function InvestorsPageContent() {
         .from("compound_log")
         .select("*")
         .order("created_at", { ascending: true }),
+      supabase
+        .from("deposits")
+        .select("*")
+        .order("deposited_at", { ascending: true }),
     ]);
     if (investorsRes.data) setInvestors(investorsRes.data);
     if (posRes.data) setAllPOs(posRes.data as DBPO[]);
@@ -286,6 +297,7 @@ function InvestorsPageContent() {
     if (creditsRes.data) setReturnCredits(creditsRes.data);
     if (ledgerRes.data) setLedgerRows(ledgerRes.data);
     if (compoundLogRes.data) setCompoundLogs(compoundLogRes.data);
+    if (depositsRes.data) setDeposits(depositsRes.data);
     setLoading(false);
   }, [supabase]);
 
@@ -329,18 +341,28 @@ function InvestorsPageContent() {
     [allPOs, selectedMonth]
   );
 
-  // Capital-change events derived from compound_log. Feeds the allocator so
-  // reinvested returns only affect POs dated *after* the reinvest, not before.
+  // Capital-change events from both compound_log (reinvests) and deposits.
+  // Deposits are timeline events too — they gate which POs can see which
+  // capital. Without this, a late deposit would retroactively fund an earlier
+  // PO (the money would time-travel).
   const capitalEvents = useMemo<CapitalEvent[]>(
-    () =>
-      compoundLogs
+    () => [
+      ...compoundLogs
         .filter((log) => log.created_at)
         .map((log) => ({
           investorId: log.investor_id,
           date: (log.created_at as string).slice(0, 10),
           delta: log.capital_after - log.capital_before,
         })),
-    [compoundLogs]
+      ...deposits
+        .filter((d) => d.deposited_at && d.investor_id)
+        .map((d) => ({
+          investorId: d.investor_id,
+          date: d.deposited_at,
+          delta: Number(d.amount),
+        })),
+    ],
+    [compoundLogs, deposits]
   );
 
   // Deployment calculation
@@ -350,34 +372,74 @@ function InvestorsPageContent() {
     return calcSharedDeployments(dPOs, dInvestors, capitalEvents, selectedMonth);
   }, [investors, poolPOs, capitalEvents, selectedMonth]);
 
+  // Per-investor "capital at horizon": live capital minus any capital event
+  // (deposit or reinvest) dated strictly after the selected month's end.
+  // Used as the utilisation denominator so past-month views don't inflate
+  // "Deployed" with capital that hadn't arrived yet at that horizon.
+  const capitalAtHorizonMap = useMemo(() => {
+    const endOfHorizon = `${selectedMonth}-31`;
+    const futureDelta: Record<string, number> = {};
+    for (const ev of capitalEvents) {
+      if ((ev.date || "") > endOfHorizon) {
+        futureDelta[ev.investorId] = (futureDelta[ev.investorId] ?? 0) + ev.delta;
+      }
+    }
+    const map = new Map<string, number>();
+    for (const inv of investors) {
+      map.set(inv.id, inv.capital - (futureDelta[inv.id] ?? 0));
+    }
+    return map;
+  }, [investors, capitalEvents, selectedMonth]);
+
   // Per-investor stats
   const investorStatsMap = useMemo(() => {
     const map = new Map<string, InvestorStats>();
     for (const inv of investors) {
+      const capAtHorizon = capitalAtHorizonMap.get(inv.id) ?? inv.capital;
       map.set(
         inv.id,
-        getInvestorStats(inv.id, inv.capital, deployments, remaining)
+        getInvestorStats(inv.id, capAtHorizon, deployments, remaining)
       );
     }
     return map;
-  }, [investors, deployments, remaining]);
+  }, [investors, deployments, remaining, capitalAtHorizonMap]);
 
   // Summary metrics
+  // `totalCapital` is live capital (assets under management) — shown on the
+  // "Total Capital" metric card so admins always see the cumulative number.
   const totalCapital = useMemo(
     () => investors.reduce((s, i) => s + i.capital, 0),
     [investors]
   );
+  // `totalCapitalAtHorizon` is the sum of each investor's capital that had
+  // actually arrived by the end of the selected month. It's the utilisation
+  // denominator — so Feb/Mar don't pretend that April's deposits were already
+  // in the pool.
+  const totalCapitalAtHorizon = useMemo(
+    () =>
+      investors.reduce(
+        (s, inv) => s + (capitalAtHorizonMap.get(inv.id) ?? inv.capital),
+        0
+      ),
+    [investors, capitalAtHorizonMap]
+  );
   // Idle = sum of investor balances still free at end-of-month (includes prior-
-  // month POs still in flight). Deployed = capital minus idle.
+  // month POs still in flight). Clamped by horizon capital so an investor
+  // hasn't-yet-deposited future capital doesn't count as idle today.
   const totalIdle = useMemo(
     () =>
       investors.reduce(
-        (s, inv) => s + Math.max(0, remaining[inv.id] ?? inv.capital),
+        (s, inv) =>
+          s +
+          Math.max(
+            0,
+            remaining[inv.id] ?? (capitalAtHorizonMap.get(inv.id) ?? inv.capital)
+          ),
         0
       ),
-    [investors, remaining]
+    [investors, remaining, capitalAtHorizonMap]
   );
-  const totalDeployed = totalCapital - totalIdle;
+  const totalDeployed = Math.max(0, totalCapitalAtHorizon - totalIdle);
   const totalReturnsEarned = useMemo(
     () =>
       deployments
@@ -834,21 +896,21 @@ function InvestorsPageContent() {
       })()}
 
       {/* Capital utilisation bar */}
-      {totalCapital > 0 && (
+      {totalCapitalAtHorizon > 0 && (
         <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-900/10">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
               Capital Utilisation
             </p>
             <p className="font-mono text-xs font-medium text-success-600">
-              {((totalDeployed / totalCapital) * 100).toFixed(0)}% deployed
+              {((totalDeployed / totalCapitalAtHorizon) * 100).toFixed(0)}% deployed
             </p>
           </div>
           <div className="flex h-3 gap-0.5 overflow-hidden rounded-full bg-gray-100">
             <div
               className="rounded-full bg-success-400 transition-all duration-500"
               style={{
-                width: `${(totalDeployed / totalCapital) * 100}%`,
+                width: `${(totalDeployed / totalCapitalAtHorizon) * 100}%`,
               }}
             />
           </div>
