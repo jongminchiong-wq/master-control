@@ -675,4 +675,221 @@ const backfillInvestors: DeploymentInvestor[] = [
   console.log("✓ Pass-1 allocation still scopes to the PO's own month");
 }
 
+// ── Test 15: Pass-1 respects deposit date (user's screenshot scenario) ────
+// Investor A joined Feb 1 but capital trickled in via deposits, not on join.
+// The Feb 15 6k PO must NOT see the Apr deposit — only the Feb 2 deposit is
+// actually available at that point, so 4k deployed + 2k unfunded (not 6k).
+
+{
+  const onlyA: DeploymentInvestor[] = [
+    { id: "A", name: "A", capital: 10_000, dateJoined: "2026-02-01" },
+  ];
+  const depositEvents: CapitalEvent[] = [
+    { investorId: "A", date: "2026-02-02", delta: 5_000 },
+    { investorId: "A", date: "2026-04-01", delta: 5_000 },
+  ];
+  const po1k: DeploymentPO = {
+    id: "p1",
+    ref: "PRX-001",
+    poDate: "2026-02-08",
+    poAmount: 1_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+  const po6k: DeploymentPO = {
+    id: "p2",
+    ref: "PRX-002",
+    poDate: "2026-02-15",
+    poAmount: 6_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+
+  const { deployments, remaining } = calcSharedDeployments(
+    [po1k, po6k],
+    onlyA,
+    depositEvents,
+    "2026-02"
+  );
+
+  const byPO = Object.fromEntries(
+    deployments.map((d) => [d.poId, d.deployed])
+  );
+  assert.equal(byPO.p1, 1_000, `Feb 8 PO should deploy 1k, got ${byPO.p1}`);
+  assert.equal(
+    byPO.p2,
+    4_000,
+    `Feb 15 PO should deploy only 4k (Apr deposit not yet arrived), got ${byPO.p2}`
+  );
+  assert.equal(
+    deployments.length,
+    2,
+    `Feb view should show 2 deployments (no Apr backfill), got ${deployments.length}`
+  );
+  assert.equal(
+    remaining.A,
+    0,
+    `A should be fully drawn down at end of Feb, got ${remaining.A}`
+  );
+  console.log("✓ Pass-1 respects deposit date (Feb 15 PO doesn't see Apr 1 deposit)");
+}
+
+// ── Test 16: Pass-2 backfills from a late deposit ─────────────────────────
+// Same fixture as Test 15, but viewed in April. The Apr 1 deposit arrives,
+// remaining capital picks up 5k, and Pass 2 backfills the 2k gap on the Feb
+// 15 PO (still open). The backfill row surfaces in April, not February,
+// because its deployedAt is pinned to the deposit date — not A.dateJoined.
+
+{
+  const onlyA: DeploymentInvestor[] = [
+    { id: "A", name: "A", capital: 10_000, dateJoined: "2026-02-01" },
+  ];
+  const depositEvents: CapitalEvent[] = [
+    { investorId: "A", date: "2026-02-02", delta: 5_000 },
+    { investorId: "A", date: "2026-04-01", delta: 5_000 },
+  ];
+  const po1k: DeploymentPO = {
+    id: "p1",
+    ref: "PRX-001",
+    poDate: "2026-02-08",
+    poAmount: 1_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+  const po6k: DeploymentPO = {
+    id: "p2",
+    ref: "PRX-002",
+    poDate: "2026-02-15",
+    poAmount: 6_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+
+  const { deployments, remaining } = calcSharedDeployments(
+    [po1k, po6k],
+    onlyA,
+    depositEvents,
+    "2026-04"
+  );
+
+  // April view contains only rows whose deployedAt falls in April — i.e. the
+  // Pass-2 backfill driven by the Apr 1 deposit. The Feb Pass-1 rows scope
+  // to Feb and are filtered out here.
+  assert.equal(
+    deployments.length,
+    1,
+    `Apr view should show 1 deployment (the backfill), got ${deployments.length}`
+  );
+  assert.equal(
+    deployments[0].poId,
+    "p2",
+    `backfill should reference Feb 15 PO, got ${deployments[0].poId}`
+  );
+  assert.equal(
+    deployments[0].deployed,
+    2_000,
+    `backfill should be 2k, got ${deployments[0].deployed}`
+  );
+  assert.equal(
+    deployments[0].deployedAt,
+    "2026-04-01",
+    `backfill deployedAt should match Apr 1 deposit date, got ${deployments[0].deployedAt}`
+  );
+  assert.equal(
+    remaining.A,
+    3_000,
+    `A should have 3k idle at end of Apr (10k capital − 7k deployed), got ${remaining.A}`
+  );
+  console.log("✓ Pass-2 backfills from late deposit, surfaces in deposit month");
+}
+
+// ── Test 17: new PO must not steal a deposit earmarked for an older gap ───
+// Reproduces the screenshot bug. A starts with 5k, two Feb POs leave a 2k
+// gap on PRX-002, then a 5k deposit arrives on Apr 1, then PRX-003 (40k)
+// lands on Apr 22. Expected: the 5k deposit pays off PRX-002 first (2k),
+// and only the leftover 3k funds PRX-003 — not the other way around.
+{
+  const onlyA: DeploymentInvestor[] = [
+    { id: "A", name: "A", capital: 10_000, dateJoined: "2026-02-01" },
+  ];
+  // Initial 5k on join, then +5k deposit on Apr 1. Live capital = 10k.
+  const events: CapitalEvent[] = [
+    { investorId: "A", date: "2026-02-01", delta: 5_000 },
+    { investorId: "A", date: "2026-04-01", delta: 5_000 },
+  ];
+  const p1: DeploymentPO = {
+    id: "p1",
+    ref: "PRX-001",
+    poDate: "2026-02-08",
+    poAmount: 1_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+  const p2: DeploymentPO = {
+    id: "p2",
+    ref: "PRX-002",
+    poDate: "2026-02-15",
+    poAmount: 6_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+  const p3: DeploymentPO = {
+    id: "p3",
+    ref: "PRX-003",
+    poDate: "2026-04-22",
+    poAmount: 40_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+
+  const { deployments, remaining } = calcSharedDeployments(
+    [p1, p2, p3],
+    onlyA,
+    events
+    // no selectedMonth — all-time view, matching the investor page
+  );
+
+  const sumBy = (poId: string) =>
+    deployments
+      .filter((d) => d.poId === poId && d.investorId === "A")
+      .reduce((s, d) => s + d.deployed, 0);
+
+  assert.equal(sumBy("p1"), 1_000, `PRX-001 should get 1k, got ${sumBy("p1")}`);
+  assert.equal(
+    sumBy("p2"),
+    6_000,
+    `PRX-002 should be fully funded — 4k Pass-1 + 2k interleaved backfill from Apr 1 deposit, got ${sumBy("p2")}`
+  );
+  assert.equal(
+    sumBy("p3"),
+    3_000,
+    `PRX-003 should receive only the leftover 3k (deposit already paid PRX-002's gap), got ${sumBy("p3")}`
+  );
+  assert.equal(remaining.A, 0, `A fully deployed, got ${remaining.A}`);
+
+  const p2Rows = deployments.filter(
+    (d) => d.poId === "p2" && d.investorId === "A"
+  );
+  const backfillRow = p2Rows.find((d) => d.deployed === 2_000);
+  assert.ok(
+    backfillRow,
+    "there should be a 2k backfill row on PRX-002 (from Apr 1 deposit)"
+  );
+  assert.equal(
+    backfillRow!.deployedAt,
+    "2026-04-01",
+    `PRX-002 backfill deployedAt should be 2026-04-01, got ${backfillRow!.deployedAt}`
+  );
+  console.log(
+    "✓ Interleaved backfill: new deposit pays older gap before later PO"
+  );
+}
+
 console.log("\nAll deployment tests passed.");

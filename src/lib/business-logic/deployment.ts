@@ -240,6 +240,64 @@ export const calcSharedDeployments = (
     if (event.kind === "capital") {
       remaining[event.investorId] =
         (remaining[event.investorId] || 0) + event.delta;
+
+      // Interleaved backfill: new capital pays off older unfunded gaps on this
+      // investor's timeline before it's allowed to fund newer POs later in
+      // Pass 1. Without this, a deposit that should top up a pre-existing gap
+      // gets "stolen" by a chronologically-later alloc event because Pass 2
+      // only runs after the whole timeline finishes. See Test 17.
+      const inv = investors.find((i) => i.id === event.investorId);
+      if (inv && inv.dateJoined) {
+        for (const po of sortedPOs) {
+          if ((po.poDate || "") > event.date) break; // oldest-first, stop at future POs
+          if (inv.dateJoined > (po.poDate || "") && inv.dateJoined > event.date) {
+            // investor must have been eligible (joined on/before the capital
+            // event or the PO). Same horizon gate Pass 2 applies.
+            continue;
+          }
+          const poAmt = po.poAmount || 0;
+          if (poAmt <= 0) continue;
+
+          const fullyPaid =
+            po.dos && po.dos.length > 0 && po.dos.every((d) => d.buyerPaid);
+          if (fullyPaid || po.commissionsCleared) continue;
+
+          const allocsForPO = (deployedByPO[po.id] ||= []);
+          const alreadyDeployed = allocsForPO.reduce(
+            (s, a) => s + a.deployed,
+            0
+          );
+          const unfunded = poAmt - alreadyDeployed;
+          if (unfunded <= 0) continue;
+
+          const avail = remaining[inv.id] || 0;
+          if (avail <= 0) break; // nothing left for this investor
+
+          const deployed = Math.min(avail, unfunded);
+          remaining[inv.id] -= deployed;
+          allocsForPO.push({ investorId: inv.id, deployed });
+
+          const invTier = getTier(inv.capital, INV_TIERS);
+          deploymentsAll.push({
+            investorId: inv.id,
+            investorName: inv.name,
+            poId: po.id,
+            poRef: po.ref,
+            poDate: po.poDate,
+            poAmount: po.poAmount,
+            channel: po.channel,
+            deployed,
+            returnAmt: deployed * (invTier.rate / 100),
+            returnRate: invTier.rate,
+            tierName: invTier.name,
+            tierEmoji: "",
+            cycleComplete: !!(fullyPaid && po.commissionsCleared),
+            // Surfaces in the month the capital actually arrived, not the
+            // older PO's month.
+            deployedAt: event.date,
+          });
+        }
+      }
       continue;
     }
 
@@ -324,6 +382,19 @@ export const calcSharedDeployments = (
   // POs are walked oldest-first, so remaining capital fills the earliest gap
   // first. Pass 1 has already consumed what it could chronologically, so Pass
   // 2 only sees POs where Pass 1 ran short on eligible capital at their time.
+
+  // Track each investor's latest in-horizon capital-event date (deposit or
+  // reinvest). For Pass-2 backfills, `deployedAt` is `max(dateJoined, lastEvent)`
+  // so the deployment row surfaces in the month the fresh capital actually
+  // arrived — not the investor's (possibly-older) join month.
+  const lastEventByInvestor: Record<string, string> = {};
+  for (const ev of inHorizonCapitalEvents) {
+    const prev = lastEventByInvestor[ev.investorId];
+    if (!prev || (ev.date || "") > prev) {
+      lastEventByInvestor[ev.investorId] = ev.date || "";
+    }
+  }
+
   for (const po of sortedPOs) {
     const poAmt = po.poAmount || 0;
     if (poAmt <= 0) continue;
@@ -387,10 +458,15 @@ export const calcSharedDeployments = (
         tierEmoji: "",
         // Reached only when !fullyPaid && !commissionsCleared — cycle open.
         cycleComplete: false,
-        // Pass-2 backfill — committed when this investor joined the pool,
-        // not when the PO was originally created. This surfaces the
-        // deployment in the investor's join-month UI view.
-        deployedAt: inv.dateJoined,
+        // Pass-2 backfill — committed when fresh capital actually arrived.
+        // For a join-only investor (no deposits/reinvests) that's dateJoined.
+        // For an investor whose latest capital event (deposit or reinvest)
+        // post-dates their join, it's that event's date — so a late deposit
+        // backfilling an older PO surfaces in the month the deposit arrived.
+        deployedAt:
+          (lastEventByInvestor[inv.id] ?? "") > inv.dateJoined
+            ? lastEventByInvestor[inv.id]
+            : inv.dateJoined,
       });
     }
   }
