@@ -17,11 +17,12 @@ import {
 } from "@/lib/business-logic/waterfall";
 import {
   calcSharedDeployments,
+  overlayReturnCredits,
   type Deployment,
   type DeploymentPO,
   type DeploymentInvestor,
-  type CapitalEvent,
 } from "@/lib/business-logic/deployment";
+import { buildCapitalEvents } from "@/lib/business-logic/capital-events";
 import { calcFundingStatus } from "@/lib/business-logic/funding-status";
 import { fmt, getMonth } from "@/lib/business-logic/formatters";
 import { useSelectedMonth } from "@/lib/hooks/use-selected-month";
@@ -55,8 +56,11 @@ type DBPO = Tables<"purchase_orders"> & {
   delivery_orders: Tables<"delivery_orders">[];
 };
 type DBOpex = Tables<"opex">;
-type DBCompoundLog = Tables<"compound_log">;
 type DBDeposit = Tables<"deposits">;
+type DBWithdrawal = Tables<"withdrawals">;
+type DBAdminAdjustment = Tables<"admin_adjustments">;
+type DBReturnCredit = Tables<"return_credits">;
+type DBIntroducerCredit = Tables<"introducer_credits">;
 
 // ── DB → Business-logic mappers ────────────────────────────
 
@@ -214,8 +218,15 @@ function EntityPageContent() {
   const [players, setPlayers] = useState<DBPlayer[]>([]);
   const [investors, setInvestors] = useState<DBInvestor[]>([]);
   const [allPOs, setAllPOs] = useState<DBPO[]>([]);
-  const [compoundLogs, setCompoundLogs] = useState<DBCompoundLog[]>([]);
   const [deposits, setDeposits] = useState<DBDeposit[]>([]);
+  const [withdrawals, setWithdrawals] = useState<DBWithdrawal[]>([]);
+  const [adminAdjustments, setAdminAdjustments] = useState<DBAdminAdjustment[]>(
+    []
+  );
+  const [returnCredits, setReturnCredits] = useState<DBReturnCredit[]>([]);
+  const [introducerCredits, setIntroducerCredits] = useState<
+    DBIntroducerCredit[]
+  >([]);
   const [opex, setOpex] = useState<DBOpex | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -250,34 +261,58 @@ function EntityPageContent() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [playersRes, investorsRes, posRes, compoundLogRes, depositsRes] =
-      await Promise.all([
-        supabase
-          .from("players")
-          .select("*")
-          .order("created_at", { ascending: true }),
-        supabase
-          .from("investors")
-          .select("*")
-          .order("created_at", { ascending: true }),
-        supabase
-          .from("purchase_orders")
-          .select("*, delivery_orders(*)")
-          .order("po_date", { ascending: true }),
-        supabase
-          .from("compound_log")
-          .select("*")
-          .order("created_at", { ascending: true }),
-        supabase
-          .from("deposits")
-          .select("*")
-          .order("deposited_at", { ascending: true }),
-      ]);
+    const [
+      playersRes,
+      investorsRes,
+      posRes,
+      depositsRes,
+      withdrawalsRes,
+      adjustmentsRes,
+      returnCreditsRes,
+      introducerCreditsRes,
+    ] = await Promise.all([
+      supabase
+        .from("players")
+        .select("*")
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("investors")
+        .select("*")
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("purchase_orders")
+        .select("*, delivery_orders(*)")
+        .order("po_date", { ascending: true }),
+      supabase
+        .from("deposits")
+        .select("*")
+        .order("deposited_at", { ascending: true }),
+      supabase
+        .from("withdrawals")
+        .select("*")
+        .order("requested_at", { ascending: true }),
+      supabase
+        .from("admin_adjustments")
+        .select("*")
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("return_credits")
+        .select("*")
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("introducer_credits")
+        .select("*")
+        .order("created_at", { ascending: true }),
+    ]);
     if (playersRes.data) setPlayers(playersRes.data);
     if (investorsRes.data) setInvestors(investorsRes.data);
     if (posRes.data) setAllPOs(posRes.data as DBPO[]);
-    if (compoundLogRes.data) setCompoundLogs(compoundLogRes.data);
     if (depositsRes.data) setDeposits(depositsRes.data);
+    if (withdrawalsRes.data) setWithdrawals(withdrawalsRes.data);
+    if (adjustmentsRes.data) setAdminAdjustments(adjustmentsRes.data);
+    if (returnCreditsRes.data) setReturnCredits(returnCreditsRes.data);
+    if (introducerCreditsRes.data)
+      setIntroducerCredits(introducerCreditsRes.data);
     setLoading(false);
   }, [supabase]);
 
@@ -399,47 +434,92 @@ function EntityPageContent() {
     [allPOs, selectedMonth]
   );
 
-  // Capital-change events from both compound_log (reinvests) and deposits.
-  // Deposits are timeline events too — they gate which POs can see which
-  // capital. Without this, a late deposit would retroactively fund an earlier
-  // PO (the money would time-travel).
-  const capitalEvents = useMemo<CapitalEvent[]>(
-    () => [
-      ...compoundLogs
-        .filter((log) => log.created_at)
-        .map((log) => ({
-          investorId: log.investor_id,
-          date: (log.created_at as string).slice(0, 10),
-          delta: log.capital_after - log.capital_before,
-        })),
-      ...deposits
-        .filter((d) => d.deposited_at && d.investor_id)
-        .map((d) => ({
-          investorId: d.investor_id,
-          date: d.deposited_at,
-          delta: Number(d.amount),
-        })),
-    ],
-    [compoundLogs, deposits]
+  // Every investors.capital mutation fed as a timeline event so the
+  // allocator's `remaining` seed starts at true initial capital. See
+  // lib/business-logic/capital-events.ts.
+  const capitalEvents = useMemo(
+    () =>
+      buildCapitalEvents({
+        deposits,
+        withdrawals,
+        adminAdjustments,
+        returnCredits,
+        introducerCredits,
+        pos: allPOs,
+      }),
+    [
+      deposits,
+      withdrawals,
+      adminAdjustments,
+      returnCredits,
+      introducerCredits,
+      allPOs,
+    ]
   );
 
   // ── Deployment calculations ──────────────────────────────
+  // Two allocator passes for two different questions:
+  //
+  //   1. Month-scoped (`remaining`, `deployments`) — feeds P&L, investor
+  //      spread, commission payables, and the per-PO deployments table.
+  //      These are historical snapshots that must stay stable when the
+  //      month picker moves; they correctly exclude capital events that
+  //      occurred after the selected month's horizon.
+  //
+  //   2. Pool-wide (`poolRemaining`) — feeds only the "unfunded gap"
+  //      banner. This is a live question ("what's short RIGHT NOW?") and
+  //      must not depend on the month picker. Without this split, a late-
+  //      credited return (return_credits.created_at after horizon) would
+  //      make admin's banner disagree with the investor portfolio's
+  //      Funding Opportunities card even though they describe the same
+  //      pool. See plans/screenshot-1-n-2-stateless-hummingbird.md.
 
-  const { deployments, remaining } = useMemo(() => {
-    const dPoolPOs = poolPOs.map(toDeploymentPO);
+  const dPoolPOs = useMemo(() => poolPOs.map(toDeploymentPO), [poolPOs]);
+
+  // Month-scoped call exposes only `deployments` to consumers on this page
+  // (P&L, spread, payables, deployments table). `remaining` from this pass
+  // is intentionally discarded — the unfunded banner uses the pool-wide
+  // `poolRemaining` below, which correctly reflects live idle capital.
+  const { deployments: rawDeployments } = useMemo(() => {
     return calcSharedDeployments(
       dPoolPOs,
       dInvestors,
       capitalEvents,
       selectedMonth
     );
-  }, [poolPOs, dInvestors, capitalEvents, selectedMonth]);
+  }, [dPoolPOs, dInvestors, capitalEvents, selectedMonth]);
+
+  // Overlay frozen return_credits so P&L / spread / payables reflect the
+  // tier rate actually paid at clearance — not whatever getTier() returns
+  // from an investor's *current* capital (which drifts with deposits and
+  // withdrawals). See lib/business-logic/deployment.ts for rationale.
+  const deployments = useMemo(
+    () => overlayReturnCredits(rawDeployments, returnCredits),
+    [rawDeployments, returnCredits]
+  );
 
   // ── Platform funding status (pool-wide, for unfunded banner) ─────────────
+  // Pool-wide allocator: no selectedMonth → horizon = null → every capital
+  // event applies, including late credits. Uses the full allPOs list so a
+  // PO from a prior month that's still unfunded surfaces here.
+  const dAllPOs = useMemo(() => allPOs.map(toDeploymentPO), [allPOs]);
 
-  const monthDeploymentPOs = useMemo(
-    () => monthPOs.map(toDeploymentPO),
-    [monthPOs]
+  const { remaining: poolRemaining, deployments: poolDeployments } = useMemo(
+    () => calcSharedDeployments(dAllPOs, dInvestors, capitalEvents),
+    [dAllPOs, dInvestors, capitalEvents]
+  );
+
+  // Mirror the investor portfolio page's backfill-eligible filter: every
+  // still-open PO (not fully cycle-complete). This is what "funding
+  // opportunities" / "unfunded gap" actually describes.
+  const backfillEligiblePOs = useMemo(
+    () =>
+      dAllPOs.filter((po) => {
+        const fullyPaid =
+          !!po.dos && po.dos.length > 0 && po.dos.every((d) => !!d.buyerPaid);
+        return !fullyPaid && !po.commissionsCleared;
+      }),
+    [dAllPOs]
   );
 
   const asOfDate = useMemo(() => {
@@ -456,13 +536,13 @@ function EntityPageContent() {
   const fundingStatus = useMemo(
     () =>
       calcFundingStatus({
-        monthPOs: monthDeploymentPOs,
-        deployments,
+        monthPOs: backfillEligiblePOs,
+        deployments: poolDeployments,
         investors: dInvestors,
-        remaining,
+        remaining: poolRemaining,
         asOfDate,
       }),
-    [monthDeploymentPOs, deployments, dInvestors, remaining, asOfDate]
+    [backfillEligiblePOs, poolDeployments, dInvestors, poolRemaining, asOfDate]
   );
 
   // ── Investor introducer commissions ──────────────────────
@@ -488,8 +568,10 @@ function EntityPageContent() {
       .filter((po) => (po.po_amount || 0) > 0)
       .map((dbPO) => {
         const wPO = toWaterfallPO(dbPO);
-        const w = calcPOWaterfall(wPO, wPlayers, wAllPOs);
         const poAmt = dbPO.po_amount || 0;
+        const poDeps = deployments.filter((d) => d.poId === dbPO.id);
+        const funded = poDeps.reduce((s, d) => s + d.deployed, 0);
+        const w = calcPOWaterfall(wPO, wPlayers, wAllPOs, funded);
         const hasSomePaid =
           dbPO.delivery_orders?.some((d) => d.buyer_paid) ?? false;
         const fullyPaid =
@@ -497,14 +579,12 @@ function EntityPageContent() {
           dbPO.delivery_orders.length > 0 &&
           dbPO.delivery_orders.every((d) => d.buyer_paid);
 
-        const poDeps = deployments.filter((d) => d.poId === dbPO.id);
         const actualPaidToInvestors = poDeps.reduce(
           (s, d) => s + d.returnAmt,
           0
         );
-        const funded = poDeps.reduce((s, d) => s + d.deployed, 0);
         const unfunded = poAmt - funded;
-        const waterfallDeducted = poAmt * (INV_RATE / 100);
+        const waterfallDeducted = funded * (INV_RATE / 100);
         const spread = waterfallDeducted - actualPaidToInvestors;
 
         const investorBreakdown: InvestorBreakdownRow[] = poDeps.map((d) => ({

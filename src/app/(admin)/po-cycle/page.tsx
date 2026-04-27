@@ -21,6 +21,15 @@ import { calcBufferPct } from "@/lib/business-logic/risk-buffer";
 import { INV_RATE, DELIVERY_MODES, URGENCY } from "@/lib/business-logic/constants";
 import { fmt, getMonth, fmtMonth } from "@/lib/business-logic/formatters";
 import { useSelectedMonth } from "@/lib/hooks/use-selected-month";
+import {
+  creditPOReturns,
+  creditIntroducerCommissions,
+} from "@/lib/business-logic/credit";
+import { buildCapitalEvents } from "@/lib/business-logic/capital-events";
+import type {
+  DeploymentInvestor,
+  DeploymentPO,
+} from "@/lib/business-logic/deployment";
 
 // Shared components
 import { MetricCard } from "@/components/metric-card";
@@ -434,6 +443,112 @@ function POCyclePageContent() {
           : po
       )
     );
+
+    // Fire investor credits inline on clear. This replaces the old "admin
+    // must visit the Investors page for the auto-fire effect to run" path,
+    // which was landing return_credits rows with now() instead of the
+    // actual clear date — producing the timestamp drift diagnosed in
+    // plans/screenshot-1-n-2-stateless-hummingbird.md. The Investors-page
+    // auto-fire still runs as a safety net for clears that slip past this
+    // path (direct SQL, older client sessions, etc.); the RPC is idempotent
+    // via UNIQUE(investor_id, po_id) so redundant fires are no-ops.
+    if (!date) return;
+    try {
+      const [
+        investorsRes,
+        depositsRes,
+        withdrawalsRes,
+        adjustmentsRes,
+        rcRes,
+        icRes,
+      ] = await Promise.all([
+        supabase.from("investors").select("*"),
+        supabase.from("deposits").select("*"),
+        supabase.from("withdrawals").select("*"),
+        supabase.from("admin_adjustments").select("*"),
+        supabase.from("return_credits").select("*"),
+        supabase.from("introducer_credits").select("*"),
+      ]);
+
+      if (!investorsRes.data) return;
+
+      const dInvestors: DeploymentInvestor[] = investorsRes.data.map((i) => ({
+        id: i.id,
+        name: i.name,
+        capital: i.capital,
+        dateJoined: i.date_joined ?? "",
+      }));
+      // Lookup tables for the introducer-credit pass — we need both the
+      // introducer chain and the live capital snapshot to compute tier.
+      const introducedByMap = new Map<string, string | null>();
+      const capitalById = new Map<string, number>();
+      for (const i of investorsRes.data) {
+        introducedByMap.set(i.id, i.introduced_by);
+        capitalById.set(i.id, i.capital);
+      }
+      // Pool-wide PO list for the allocator — mirrors the admin Entity page
+      // (all POs up to horizon, since late clears can affect older months).
+      const dPOs: DeploymentPO[] = allPOs.map((po) => ({
+        id: po.id,
+        ref: po.ref,
+        poDate: po.po_date,
+        poAmount: po.po_amount,
+        channel: po.channel,
+        dos: (po.delivery_orders ?? []).map((d) => ({ buyerPaid: d.buyer_paid })),
+        commissionsCleared:
+          po.id === poId ? date : po.commissions_cleared,
+      }));
+      // Patch in the optimistic commissions_cleared date so any existing
+      // return_credits for this PO (e.g. a stale row from a prior clear +
+      // undo cycle) get dated at the fresh clear date — matches how dPOs
+      // above injects the same optimistic value for the allocator.
+      const patchedPOs = allPOs.map((po) =>
+        po.id === poId ? { ...po, commissions_cleared: date } : po
+      );
+      const capitalEvents = buildCapitalEvents({
+        deposits: depositsRes.data ?? [],
+        withdrawals: withdrawalsRes.data ?? [],
+        adminAdjustments: adjustmentsRes.data ?? [],
+        returnCredits: rcRes.data ?? [],
+        introducerCredits: icRes.data ?? [],
+        pos: patchedPOs,
+      });
+
+      const result = await creditPOReturns({
+        supabase,
+        poId,
+        clearDate: date,
+        investors: dInvestors,
+        poolPOs: dPOs,
+        capitalEvents,
+      });
+
+      for (const err of result.errors) {
+        console.error("Credit RPC error on PO clear:", err);
+      }
+
+      // Same flow for introducer commissions — must run after the investor
+      // returns are credited so the introducer's tier reflects any
+      // reinvestment that just happened from this PO.
+      const introResult = await creditIntroducerCommissions({
+        supabase,
+        poId,
+        clearDate: date,
+        investors: dInvestors,
+        introducedBy: introducedByMap,
+        capitalById,
+        poolPOs: dPOs,
+        capitalEvents,
+      });
+
+      for (const err of introResult.errors) {
+        console.error("Introducer credit RPC error on PO clear:", err);
+      }
+    } catch (err) {
+      // Non-fatal: the PO is still marked cleared. Investors-page auto-fire
+      // will catch up next time that page loads.
+      console.error("Inline credit-on-clear failed:", err);
+    }
   }
 
   // ── CRUD: Delivery Orders ─────────────────────────────────
@@ -976,9 +1091,11 @@ function PORow({
     return s + d.amount * (1 + bp / 100);
   }, 0);
 
-  // EU commission from waterfall
+  // EU commission from waterfall. PO list view doesn't fetch deployments —
+  // assume full funding for the player-commission preview. The entity page
+  // is the authoritative view that uses actual Σ deployed.
   const waterfall = po.po_amount > 0
-    ? calcPOWaterfall(toWaterfallPO(po), wPlayers, wAllPOs)
+    ? calcPOWaterfall(toWaterfallPO(po), wPlayers, wAllPOs, po.po_amount)
     : null;
   const euComm = waterfall?.euAmt ?? 0;
 
@@ -1011,7 +1128,7 @@ function PORow({
           {po.ref}
         </TableCell>
         <TableCell>
-          <ChannelBadge channel={po.channel} />
+          <ChannelBadge channel={po.channel as "punchout" | "gep"} />
         </TableCell>
         <TableCell className="text-xs text-gray-500">{po.po_date}</TableCell>
         <TableCell className="text-sm font-medium text-gray-800">

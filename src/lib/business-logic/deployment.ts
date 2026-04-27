@@ -96,15 +96,36 @@ export interface Deployment {
 // matching the original behaviour for callers that already scope their input.
 //
 // Pass 2 — backfill. After the chronological timeline finishes, any PO that
-// still has an unfunded gap AND is not fully cycle-complete (≥ one DO still
-// unpaid and commissions_cleared not set) is offered to investors with idle
-// capital, regardless of whether their dateJoined precedes the po.poDate.
-// Horizon still applies: an investor must have joined on or before horizon
-// to backfill. A PO with some DOs already buyer-paid is STILL eligible for
-// backfill (Option 2 semantics) — this accepts a small fairness cost (late
-// investor earns full tier rate on a deal where cashflow has partially
-// started) in exchange for day-to-day operational practicality (the user
-// needs to mark DOs paid as they come in without freezing the gap).
+// still has an unfunded gap is offered to investors with idle capital,
+// regardless of whether their dateJoined precedes the po.poDate.
+//
+// Eligibility:
+//   - Investor must have joined on or before the PO's "close-off" date:
+//     commissions_cleared (if set) else horizon. This lets a late-joiner
+//     backfill a PO that was open when they joined and has since cleared —
+//     so their return flows through the credit pipeline instead of
+//     evaporating the moment admin sets commissions_cleared. It also
+//     prevents a brand-new investor from retroactively claiming credit on
+//     a PO that closed before they existed (joined after clearance ⇒ reject).
+//   - A PO with some DOs already buyer-paid is STILL eligible for backfill
+//     (Option 2 semantics) — operational practicality over fairness edge.
+//   - A PO that is fully buyer-paid but NOT yet cleared is skipped — the
+//     cash cycle is mechanically over, nothing meaningful for Pass 2 to do.
+//   - An investor who already funded via Pass 1 is excluded from Pass 2 on
+//     the same PO, so a Mar 5 return doesn't double-allocate A's just-
+//     refunded capital back onto PRX-002.
+//
+// Balance sheet:
+//   - If the PO's capital has already returned (fullyPaid or cleared) by
+//     the time Pass 2 runs, the return event already fired on the timeline
+//     without the late-joiner's allocation in it. We simulate that return
+//     here by refunding the deduction — otherwise end-of-horizon `remaining`
+//     shows the late-joiner as still-deployed on a deal that's already
+//     closed, which is wrong for the utilisation bar.
+//
+// cycleComplete is derived from the PO's real state, not hardcoded — so a
+// backfill row on a cleared PO is cycleComplete:true and enters the same
+// credit_investor_return pipeline as Pass 1 rows.
 
 const endOfMonth = (month: string): string => {
   // month is "YYYY-MM"; returns "YYYY-MM-31" which sorts correctly against any
@@ -171,11 +192,28 @@ export const calcSharedDeployments = (
     }
   }
 
+  // Synthetic "join" events — zero-delta trigger markers at each investor's
+  // dateJoined. They do NOT add capital (seeding already puts initial capital
+  // in `remaining`); they exist solely to fire the existing interleaved-
+  // backfill loop below at the moment an investor joins, so their money pays
+  // off older unfunded POs BEFORE any later-dated PO alloc can grab it.
+  // Without this, a late-joiner sees their PRX-002 backfill shift every time
+  // a new March PO is added (9,960 → 5,408 → disappearing), because Pass 1
+  // consumes their capital chronologically before Pass 2 runs.
+  const joinEvents: CapitalEvent[] = investors
+    .filter((inv) => inv.dateJoined)
+    .map((inv) => ({
+      investorId: inv.id,
+      date: inv.dateJoined,
+      delta: 0,
+    }));
+  const allCapitalEvents: CapitalEvent[] = [...capitalEvents, ...joinEvents];
+
   // Capital events in horizon become timeline events. Investor's current
   // `capital` already reflects every event in this list (the DB moves
   // cash_balance -> capital atomically with a compound_log insert), so the
   // delta is "applied" not "additive" — we just need to defer it to its date.
-  const inHorizonCapitalEvents = capitalEvents.filter(
+  const inHorizonCapitalEvents = allCapitalEvents.filter(
     (ev) => !horizon || (ev.date || "") <= horizon
   );
   for (const ev of inHorizonCapitalEvents) {
@@ -209,13 +247,11 @@ export const calcSharedDeployments = (
   });
 
   // Seed `remaining` with each investor's *initial* capital by subtracting
-  // ALL capital events (not just in-horizon). Rationale: `investors[i].capital`
+  // ALL real capital events (not just in-horizon). Rationale: `investors[i].capital`
   // is the current value, which already includes every past reinvest. If we
   // only subtract in-horizon deltas, an out-of-horizon future reinvest would
-  // bleed into the past view (e.g. reinvesting Mar returns on 04-20 would
-  // inflate March's allocation when someone flips the dropdown back to March).
-  // In-horizon events replay on the timeline below to bring `remaining` up
-  // to the correct value at horizon end; out-of-horizon events stay out.
+  // bleed into the past view. Join events are zero-delta so they don't
+  // affect this sum — they only trigger backfill when they fire.
   const totalDeltaByInvestor: Record<string, number> = {};
   for (const ev of capitalEvents) {
     totalDeltaByInvestor[ev.investorId] =
@@ -228,7 +264,46 @@ export const calcSharedDeployments = (
 
   const deploymentsAll: Deployment[] = [];
 
-  for (const event of events) {
+  // Merge allocations for the same (investorId, poId, deployedAt-month) into
+  // a single row. When a PO is oversubscribed and multiple capital events in
+  // the same month top it up — Pass-1 plus N interleaved backfills — the raw
+  // emission produces one row per event, which the UI treats as N separate
+  // deployments. Merging within a month collapses them into one natural
+  // "investor committed X to this PO" row.
+  //
+  // The month key matters: Pass-2 can emit a row for the same (investor, PO)
+  // with a deployedAt in a later month (a late deposit backfilling an older
+  // PO — see Test 16). That row is intentionally separate so it surfaces in
+  // the month the fresh capital arrived; we must not fold it back into the
+  // original Pass-1 row.
+  //
+  // Earliest deployedAt within the month wins, so the row stays pinned to
+  // the first commitment date in that month.
+  const upsertDeployment = (row: Deployment) => {
+    const rowMonth = monthOf(row.deployedAt ?? row.poDate);
+    const existing = deploymentsAll.find(
+      (d) =>
+        d.investorId === row.investorId &&
+        d.poId === row.poId &&
+        monthOf(d.deployedAt ?? d.poDate) === rowMonth
+    );
+    if (!existing) {
+      deploymentsAll.push(row);
+      return;
+    }
+    existing.deployed += row.deployed;
+    existing.returnAmt += row.returnAmt;
+    const rowAt = row.deployedAt ?? row.poDate;
+    const existingAt = existing.deployedAt ?? existing.poDate;
+    if (rowAt && existingAt && rowAt < existingAt) {
+      existing.deployedAt = row.deployedAt;
+    }
+    existing.cycleComplete = row.cycleComplete;
+  };
+
+  for (let eventIdx = 0; eventIdx < events.length; eventIdx++) {
+    const event = events[eventIdx];
+
     if (event.kind === "return") {
       for (const alloc of event.allocs) {
         remaining[alloc.investorId] =
@@ -238,47 +313,124 @@ export const calcSharedDeployments = (
     }
 
     if (event.kind === "capital") {
-      remaining[event.investorId] =
-        (remaining[event.investorId] || 0) + event.delta;
+      // Batch consecutive same-date capital events. When a PO clears, every
+      // investor's return-credit and introducer-commission share the clear
+      // date, so they all surface in a single batch. The prior per-event
+      // greedy fill let whichever event fired first in array order claim
+      // the whole unfunded gap on an older PO, leaving the last investor
+      // partly idle (Test 18 — five investors with same-day returns saw
+      // PRX-002 funded 10,400/10,400/10,400/10,400/8,400 instead of pro-
+      // rata). Batching first, then pro-rata-filling once across the batch,
+      // keeps the timeline order Test 17 depends on while distributing
+      // same-day credits fairly.
+      const batchDate = event.date;
+      const batch: CapitalChangeEvent[] = [event as CapitalChangeEvent];
+      while (
+        eventIdx + 1 < events.length &&
+        events[eventIdx + 1].kind === "capital" &&
+        events[eventIdx + 1].date === batchDate
+      ) {
+        eventIdx++;
+        batch.push(events[eventIdx] as CapitalChangeEvent);
+      }
 
-      // Interleaved backfill: new capital pays off older unfunded gaps on this
-      // investor's timeline before it's allowed to fund newer POs later in
-      // Pass 1. Without this, a deposit that should top up a pre-existing gap
-      // gets "stolen" by a chronologically-later alloc event because Pass 2
-      // only runs after the whole timeline finishes. See Test 17.
-      const inv = investors.find((i) => i.id === event.investorId);
-      if (inv && inv.dateJoined) {
-        for (const po of sortedPOs) {
-          if ((po.poDate || "") > event.date) break; // oldest-first, stop at future POs
-          if (inv.dateJoined > (po.poDate || "") && inv.dateJoined > event.date) {
-            // investor must have been eligible (joined on/before the capital
-            // event or the PO). Same horizon gate Pass 2 applies.
-            continue;
+      // Apply every delta in the batch BEFORE filling any PO so pro-rata
+      // weights reflect the full credited pool (return + intro + any other
+      // same-day credits land together for an investor who introduced
+      // someone — they get RM 400 return AND RM 84 intro on the same day,
+      // both should weigh into PRX-002's split).
+      for (const ev of batch) {
+        remaining[ev.investorId] =
+          (remaining[ev.investorId] || 0) + ev.delta;
+      }
+
+      // Unique investors who received credits in this batch — only they
+      // participate in the pro-rata fill. An investor sitting on idle
+      // capital who got NO credit today doesn't get their balance pulled
+      // in just because someone else's return cleared today (preserves
+      // Test 17's deposit-then-alloc semantics: idle capital reserved for
+      // its owner's future POs is not redistributed by an unrelated event).
+      const batchInvestors = Array.from(new Set(batch.map((e) => e.investorId)))
+        .map((id) => investors.find((inv) => inv.id === id))
+        .filter(
+          (inv): inv is DeploymentInvestor => !!inv && !!inv.dateJoined
+        );
+
+      // Pro-rata fill older unfunded POs from the batched pool, oldest-
+      // first so the earliest gap fills first.
+      for (const po of sortedPOs) {
+        if ((po.poDate || "") > batchDate) break;
+
+        const poAmt = po.poAmount || 0;
+        if (poAmt <= 0) continue;
+
+        // `fullyPaid` (current state) feeds cycleComplete on emitted rows.
+        // Backfill-skip uses a *time-aware* check: at this batch's date,
+        // a DO counts as buyer-paid only if its buyerPaid ≤ batchDate,
+        // and clearance counts only if commissionsCleared ≤ batchDate.
+        // A PO that later gets paid/cleared was still *open* at this
+        // moment and is a legitimate backfill target.
+        const fullyPaid =
+          !!po.dos && po.dos.length > 0 && po.dos.every((d) => d.buyerPaid);
+        const fullyPaidAtEventTime =
+          !!po.dos &&
+          po.dos.length > 0 &&
+          po.dos.every((d) => d.buyerPaid && d.buyerPaid <= batchDate);
+        const clearedAtEventTime =
+          !!po.commissionsCleared && po.commissionsCleared <= batchDate;
+        if (fullyPaidAtEventTime || clearedAtEventTime) continue;
+
+        const allocsForPO = (deployedByPO[po.id] ||= []);
+        const alreadyDeployed = allocsForPO.reduce(
+          (s, a) => s + a.deployed,
+          0
+        );
+        const unfunded = poAmt - alreadyDeployed;
+        if (unfunded <= 0) continue;
+
+        // Eligibility mirrors the original interleaved-backfill gate: an
+        // investor must have joined on/before the PO date OR on/before the
+        // batch date (Pass-2 horizon-style). Drop investors with no idle.
+        const eligibleBatch = batchInvestors.filter((inv) => {
+          if (
+            inv.dateJoined > (po.poDate || "") &&
+            inv.dateJoined > batchDate
+          ) {
+            return false;
           }
-          const poAmt = po.poAmount || 0;
-          if (poAmt <= 0) continue;
+          return (remaining[inv.id] || 0) > 0;
+        });
+        if (eligibleBatch.length === 0) continue;
 
-          const fullyPaid =
-            po.dos && po.dos.length > 0 && po.dos.every((d) => d.buyerPaid);
-          if (fullyPaid || po.commissionsCleared) continue;
+        const totalAvail = eligibleBatch.reduce(
+          (s, inv) => s + (remaining[inv.id] || 0),
+          0
+        );
+        if (totalAvail <= 0) continue;
 
-          const allocsForPO = (deployedByPO[po.id] ||= []);
-          const alreadyDeployed = allocsForPO.reduce(
-            (s, a) => s + a.deployed,
-            0
-          );
-          const unfunded = poAmt - alreadyDeployed;
-          if (unfunded <= 0) continue;
+        const toFund = Math.min(unfunded, totalAvail);
+        let allocated = 0;
 
+        for (let idx = 0; idx < eligibleBatch.length; idx++) {
+          const inv = eligibleBatch[idx];
           const avail = remaining[inv.id] || 0;
-          if (avail <= 0) break; // nothing left for this investor
+          if (avail <= 0) continue;
 
-          const deployed = Math.min(avail, unfunded);
+          // Last eligible investor absorbs rounding remainder, mirroring
+          // Pass 1 / Pass 2.
+          const isLast = idx === eligibleBatch.length - 1;
+          const share = avail / totalAvail;
+          const deployed = isLast
+            ? Math.min(avail, toFund - allocated)
+            : Math.min(avail, Math.floor(share * toFund));
+          if (deployed <= 0) continue;
+
+          allocated += deployed;
           remaining[inv.id] -= deployed;
           allocsForPO.push({ investorId: inv.id, deployed });
 
           const invTier = getTier(inv.capital, INV_TIERS);
-          deploymentsAll.push({
+          upsertDeployment({
             investorId: inv.id,
             investorName: inv.name,
             poId: po.id,
@@ -294,7 +446,7 @@ export const calcSharedDeployments = (
             cycleComplete: !!(fullyPaid && po.commissionsCleared),
             // Surfaces in the month the capital actually arrived, not the
             // older PO's month.
-            deployedAt: event.date,
+            deployedAt: batchDate,
           });
         }
       }
@@ -347,7 +499,7 @@ export const calcSharedDeployments = (
       const invReturnRate = invTier.rate;
       const returnAmtTiered = deployed * (invReturnRate / 100);
 
-      deploymentsAll.push({
+      upsertDeployment({
         investorId: inv.id,
         investorName: inv.name,
         poId: po.id,
@@ -362,8 +514,9 @@ export const calcSharedDeployments = (
         tierEmoji: "",
         // "cycle complete" fires only when BOTH the deal is cash-collected
         // (all DOs buyer-paid) AND admin has set commissions_cleared on the PO.
-        // Until both, the return hasn't flowed to the investor, so it stays
-        // pending and introducer commission isn't credited.
+        // Until both, the return hasn't flowed to the investor — and neither
+        // has any introducer commission (creditIntroducerCommissions in
+        // credit.ts also keys off cycleComplete, mirroring creditPOReturns).
         cycleComplete: !!(fullyPaid && po.commissionsCleared),
         // Pass-1 allocation — committed on the PO's own date.
         deployedAt: po.poDate,
@@ -400,18 +553,38 @@ export const calcSharedDeployments = (
     if (poAmt <= 0) continue;
 
     const fullyPaid =
-      po.dos && po.dos.length > 0 && po.dos.every((d) => d.buyerPaid);
-    if (fullyPaid || po.commissionsCleared) continue;
+      !!po.dos && po.dos.length > 0 && po.dos.every((d) => d.buyerPaid);
+    // fullyPaid-but-not-cleared: cash collected from buyer, nothing for Pass 2
+    // to meaningfully attribute. Skip. (Once admin sets commissionsCleared,
+    // the PO becomes eligible for during-open-window backfill below.)
+    if (fullyPaid && !po.commissionsCleared) continue;
 
     const allocsForPO = (deployedByPO[po.id] ||= []);
     const alreadyDeployed = allocsForPO.reduce((s, a) => s + a.deployed, 0);
     const unfunded = poAmt - alreadyDeployed;
     if (unfunded <= 0) continue;
 
+    // Capital has already returned if either: all DOs buyer-paid (cash in)
+    // or commissions cleared (distributed). In both cases the return event
+    // has already fired on the timeline without any Pass-2 allocation in its
+    // allocs list, so we refund below to keep `remaining` accurate.
+    const capitalReturned = fullyPaid || !!po.commissionsCleared;
+    const cycleComplete = !!(fullyPaid && po.commissionsCleared);
+
+    // Eligibility cut-off: cleared POs stop accepting new allocations at
+    // their clearance date (late-joiners after clear don't retroactively
+    // fund a closed deal). Open POs use horizon.
+    const eligibilityEndDate = po.commissionsCleared || horizon || "9999-12-31";
+    // Pass 1 already captured investors eligible at po.poDate. Pass 2 is
+    // strictly for late-joiners — exclude anyone already in allocsForPO so
+    // a return-refunded A doesn't get re-attributed to the same PO.
+    const alreadyFunded = new Set(allocsForPO.map((a) => a.investorId));
+
     const backfillPool = investors.filter(
       (inv) =>
+        !alreadyFunded.has(inv.id) &&
         inv.dateJoined &&
-        (!horizon || inv.dateJoined <= horizon) &&
+        inv.dateJoined <= eligibilityEndDate &&
         (remaining[inv.id] || 0) > 0
     );
     const totalAvail = backfillPool.reduce(
@@ -438,12 +611,18 @@ export const calcSharedDeployments = (
       allocated += deployed;
       remaining[inv.id] -= deployed;
       allocsForPO.push({ investorId: inv.id, deployed });
+      if (capitalReturned) {
+        // The real-world return event already fired without this investor
+        // in its allocs. Simulate the return by refunding the deduction so
+        // utilisation reflects the fact that capital is back, not stuck.
+        remaining[inv.id] += deployed;
+      }
 
       const invTier = getTier(inv.capital, INV_TIERS);
       const invReturnRate = invTier.rate;
       const returnAmtTiered = deployed * (invReturnRate / 100);
 
-      deploymentsAll.push({
+      upsertDeployment({
         investorId: inv.id,
         investorName: inv.name,
         poId: po.id,
@@ -456,8 +635,9 @@ export const calcSharedDeployments = (
         returnRate: invReturnRate,
         tierName: invTier.name,
         tierEmoji: "",
-        // Reached only when !fullyPaid && !commissionsCleared — cycle open.
-        cycleComplete: false,
+        // Derived from the PO's real state — true for cleared POs so the
+        // backfill row is credited via credit_investor_return like Pass 1.
+        cycleComplete,
         // Pass-2 backfill — committed when fresh capital actually arrived.
         // For a join-only investor (no deposits/reinvests) that's dateJoined.
         // For an investor whose latest capital event (deposit or reinvest)
@@ -485,3 +665,58 @@ export const calcSharedDeployments = (
 
   return { deployments, remaining };
 };
+
+// ── Frozen-returns overlay ────────────────────────────────────
+// When admin sets commissions_cleared, credit_investor_return inserts a row
+// into return_credits with the frozen (amount, deployed, tier_rate) for that
+// (investor, PO) pair. The row is permanent: the RPC uses ON CONFLICT DO
+// NOTHING so the first clear wins. calcSharedDeployments, however, re-derives
+// returnAmt/returnRate on every render via getTier(inv.capital) — so any
+// later capital change that crosses a tier boundary (withdrawal drops an
+// investor below Silver; compound bumps them to Gold) retroactively rewrites
+// historical cycle returns in the UI.
+//
+// This helper patches that: for every allocator row whose (investor, PO)
+// pair has a stored credit, returnAmt and returnRate are replaced with the
+// frozen DB values, and cycleComplete is forced to true (if we have a credit
+// the cycle provably closed).
+//
+// `deployed` is intentionally NOT overwritten — it's the allocator's
+// allocation-truth number (proportional split over remaining), and the
+// entity page's spread math uses it as the denominator for the 5% waterfall
+// deduction. Overwriting could push per-PO funding totals past po_amount.
+// tierName/tierEmoji are display-only and left alone.
+//
+// TODO: orphan credits (credit row exists but allocator emitted no row for
+// that pair — e.g. late-joiner Pass-2 window closed, or investor deleted)
+// are not synthesized here. Rare in practice; add phantom-row synthesis if
+// it becomes a real support issue.
+
+export interface ReturnCreditRow {
+  investor_id: string;
+  po_id: string;
+  amount: number;
+  deployed: number;
+  tier_rate: number;
+}
+
+export function overlayReturnCredits(
+  deployments: Deployment[],
+  returnCredits: ReturnCreditRow[]
+): Deployment[] {
+  if (returnCredits.length === 0) return deployments;
+  const byKey = new Map<string, ReturnCreditRow>();
+  for (const c of returnCredits) {
+    byKey.set(`${c.investor_id}:${c.po_id}`, c);
+  }
+  return deployments.map((d) => {
+    const c = byKey.get(`${d.investorId}:${d.poId}`);
+    if (!c) return d;
+    return {
+      ...d,
+      returnAmt: c.amount,
+      returnRate: c.tier_rate,
+      cycleComplete: true,
+    };
+  });
+}

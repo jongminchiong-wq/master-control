@@ -1,26 +1,27 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw, Check, X, Banknote, ArrowDownToLine, ArrowDownCircle } from "lucide-react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Check, X, Banknote, ArrowDownCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { Tables, LedgerRow } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 // Business logic
-import { INV_TIERS, INV_INTRO_TIERS } from "@/lib/business-logic/constants";
+import { INV_TIERS } from "@/lib/business-logic/constants";
 import { getTier, getInvIntroTier } from "@/lib/business-logic/tiers";
 import {
   calcSharedDeployments,
+  overlayReturnCredits,
   type Deployment,
   type DeploymentPO,
   type DeploymentInvestor,
-  type CapitalEvent,
 } from "@/lib/business-logic/deployment";
-import { fmt, getMonth, fmtMonth } from "@/lib/business-logic/formatters";
+import { buildCapitalEvents } from "@/lib/business-logic/capital-events";
 import {
-  shouldAutoCompound,
-  daysUntilCompound,
-} from "@/lib/business-logic/compounding";
+  creditPOReturns,
+  creditIntroducerCommissions,
+} from "@/lib/business-logic/credit";
+import { fmt, getMonth } from "@/lib/business-logic/formatters";
 import { useSelectedMonth } from "@/lib/hooks/use-selected-month";
 
 // Shared components
@@ -49,7 +50,6 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -64,8 +64,9 @@ import {
 type DBInvestor = Tables<"investors">;
 type DBWithdrawal = Tables<"withdrawals">;
 type DBReturnCredit = Tables<"return_credits">;
-type DBCompoundLog = Tables<"compound_log">;
+type DBIntroducerCredit = Tables<"introducer_credits">;
 type DBDeposit = Tables<"deposits">;
+type DBAdminAdjustment = Tables<"admin_adjustments">;
 type DBPO = Tables<"purchase_orders"> & {
   delivery_orders: Tables<"delivery_orders">[];
 };
@@ -145,12 +146,20 @@ interface IntroducerRow {
   totalCapitalIntroduced: number;
   tier: { name: string; rate: number; min: number; max: number };
   totalReturns: number;
+  // Earned: actually credited to capital (sum of introducer_credits rows
+  // for this introducer). Pending: theoretical commission for cycles that
+  // haven't cleared yet, computed at the *current* tier rate as a forward
+  // estimate. commission = earned + pending — kept for backward
+  // compatibility with the "INTRO COMMISSIONS" tile.
+  commissionEarned: number;
+  commissionPending: number;
   commission: number;
 }
 
 function calcIntroducerData(
   investors: DBInvestor[],
-  deployments: Deployment[]
+  deployments: Deployment[],
+  introducerCredits: DBIntroducerCredit[]
 ): IntroducerRow[] {
   const introducerIds = [
     ...new Set(investors.map((i) => i.introduced_by).filter(Boolean)),
@@ -169,17 +178,40 @@ function calcIntroducerData(
       );
       const tier = getInvIntroTier(totalCapitalIntroduced);
 
-      // Commission = tier% * actual returns earned by their investors (completed cycles only)
-      const totalReturns = theirInvestors.reduce((sum, inv) => {
+      // Pending commission: cycles still active (not cleared) — apply the
+      // current tier rate as a forward estimate. Once cleared, the credit
+      // is locked into a row at the rate-as-of-clear-date.
+      const pendingReturns = theirInvestors.reduce((sum, inv) => {
         const invDeps = deployments.filter((d) => d.investorId === inv.id);
         return (
           sum +
           invDeps
-            .filter((d) => d.cycleComplete)
+            .filter((d) => !d.cycleComplete)
             .reduce((s, d) => s + d.returnAmt, 0)
         );
       }, 0);
-      const commission = totalReturns * (tier.rate / 100);
+      const commissionPending = pendingReturns * (tier.rate / 100);
+
+      // Earned commission: sum of credited introducer_credits for this
+      // introducer. base_return on each row is the introducee's actual
+      // PO return — summing those gives "investor returns that paid out"
+      // for the displayed total returns column.
+      const myCredits = introducerCredits.filter(
+        (ic) => ic.introducer_id === introId
+      );
+      const commissionEarned = myCredits.reduce(
+        (s, ic) => s + Number(ic.amount),
+        0
+      );
+      const earnedReturns = myCredits.reduce(
+        (s, ic) => s + Number(ic.base_return),
+        0
+      );
+
+      // totalReturns is what the investors page used to display in the
+      // "Investor Returns" column (basis for commission). Earned cycles
+      // come from credits rows, pending from in-flight deployments.
+      const totalReturns = earnedReturns + pendingReturns;
 
       return {
         id: introId,
@@ -188,7 +220,9 @@ function calcIntroducerData(
         totalCapitalIntroduced,
         tier,
         totalReturns,
-        commission,
+        commissionEarned,
+        commissionPending,
+        commission: commissionEarned + commissionPending,
       };
     })
     .filter((x): x is IntroducerRow => x !== null);
@@ -208,7 +242,12 @@ function InvestorsPageContent() {
   const [allPOs, setAllPOs] = useState<DBPO[]>([]);
   const [withdrawals, setWithdrawals] = useState<DBWithdrawal[]>([]);
   const [returnCredits, setReturnCredits] = useState<DBReturnCredit[]>([]);
-  const [compoundLogs, setCompoundLogs] = useState<DBCompoundLog[]>([]);
+  const [introducerCredits, setIntroducerCredits] = useState<
+    DBIntroducerCredit[]
+  >([]);
+  const [adminAdjustments, setAdminAdjustments] = useState<DBAdminAdjustment[]>(
+    []
+  );
   const [deposits, setDeposits] = useState<DBDeposit[]>([]);
   const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -261,8 +300,9 @@ function InvestorsPageContent() {
       posRes,
       withdrawalsRes,
       creditsRes,
+      introCreditsRes,
       ledgerRes,
-      compoundLogRes,
+      adjustmentsRes,
       depositsRes,
     ] = await Promise.all([
       supabase
@@ -278,12 +318,13 @@ function InvestorsPageContent() {
         .select("*")
         .order("requested_at", { ascending: false }),
       supabase.from("return_credits").select("*"),
+      supabase.from("introducer_credits").select("*"),
       supabase
         .from("v_investor_ledger")
         .select("*")
         .order("at", { ascending: false }),
       supabase
-        .from("compound_log")
+        .from("admin_adjustments")
         .select("*")
         .order("created_at", { ascending: true }),
       supabase
@@ -295,8 +336,9 @@ function InvestorsPageContent() {
     if (posRes.data) setAllPOs(posRes.data as DBPO[]);
     if (withdrawalsRes.data) setWithdrawals(withdrawalsRes.data);
     if (creditsRes.data) setReturnCredits(creditsRes.data);
+    if (introCreditsRes.data) setIntroducerCredits(introCreditsRes.data);
     if (ledgerRes.data) setLedgerRows(ledgerRes.data);
-    if (compoundLogRes.data) setCompoundLogs(compoundLogRes.data);
+    if (adjustmentsRes.data) setAdminAdjustments(adjustmentsRes.data);
     if (depositsRes.data) setDeposits(depositsRes.data);
     setLoading(false);
   }, [supabase]);
@@ -341,36 +383,45 @@ function InvestorsPageContent() {
     [allPOs, selectedMonth]
   );
 
-  // Capital-change events from both compound_log (reinvests) and deposits.
-  // Deposits are timeline events too — they gate which POs can see which
-  // capital. Without this, a late deposit would retroactively fund an earlier
-  // PO (the money would time-travel).
-  const capitalEvents = useMemo<CapitalEvent[]>(
-    () => [
-      ...compoundLogs
-        .filter((log) => log.created_at)
-        .map((log) => ({
-          investorId: log.investor_id,
-          date: (log.created_at as string).slice(0, 10),
-          delta: log.capital_after - log.capital_before,
-        })),
-      ...deposits
-        .filter((d) => d.deposited_at && d.investor_id)
-        .map((d) => ({
-          investorId: d.investor_id,
-          date: d.deposited_at,
-          delta: Number(d.amount),
-        })),
-    ],
-    [compoundLogs, deposits]
+  // Every event that mutates investors.capital on the timeline — deposits,
+  // capital withdrawals (submit-time debit), admin adjustments, and return
+  // credits (Option C: credits bump capital directly). Builder lives in
+  // lib/business-logic/capital-events so all four allocator-calling pages
+  // stay in sync; missing a source here silently corrupts `remaining`.
+  const capitalEvents = useMemo(
+    () =>
+      buildCapitalEvents({
+        deposits,
+        withdrawals,
+        adminAdjustments,
+        returnCredits,
+        introducerCredits,
+        pos: allPOs,
+      }),
+    [
+      deposits,
+      withdrawals,
+      adminAdjustments,
+      returnCredits,
+      introducerCredits,
+      allPOs,
+    ]
   );
 
   // Deployment calculation
-  const { deployments, remaining } = useMemo(() => {
+  const { deployments: rawDeployments, remaining } = useMemo(() => {
     const dInvestors = investors.map(toDeploymentInvestor);
     const dPOs = poolPOs.map(toDeploymentPO);
     return calcSharedDeployments(dPOs, dInvestors, capitalEvents, selectedMonth);
   }, [investors, poolPOs, capitalEvents, selectedMonth]);
+
+  // Overlay frozen return_credits onto completed-cycle rows so historical
+  // returns survive later capital changes. See overlayReturnCredits in
+  // lib/business-logic/deployment.ts for the full rationale.
+  const deployments = useMemo(
+    () => overlayReturnCredits(rawDeployments, returnCredits),
+    [rawDeployments, returnCredits]
+  );
 
   // Per-investor "capital at horizon": live capital minus any capital event
   // (deposit or reinvest) dated strictly after the selected month's end.
@@ -457,13 +508,18 @@ function InvestorsPageContent() {
 
   // Introducer data
   const introducerData = useMemo(
-    () => calcIntroducerData(investors, deployments),
-    [investors, deployments]
+    () => calcIntroducerData(investors, deployments, introducerCredits),
+    [investors, deployments, introducerCredits]
   );
-  const totalIntroComm = useMemo(
-    () => introducerData.reduce((s, d) => s + d.commission, 0),
+  const totalIntroCommEarned = useMemo(
+    () => introducerData.reduce((s, d) => s + d.commissionEarned, 0),
     [introducerData]
   );
+  const totalIntroCommPending = useMemo(
+    () => introducerData.reduce((s, d) => s + d.commissionPending, 0),
+    [introducerData]
+  );
+  const totalIntroComm = totalIntroCommEarned + totalIntroCommPending;
 
   // Pending withdrawals
   const pendingWithdrawals = useMemo(
@@ -478,11 +534,33 @@ function InvestorsPageContent() {
     return set;
   }, [returnCredits]);
 
-  // Total cash balance across all investors
-  const totalCashBalance = useMemo(
-    () => investors.reduce((s, i) => s + (i.cash_balance ?? 0), 0),
-    [investors]
-  );
+  // Introducer-credit triple-key set: introducer:introducee:po. Used by the
+  // auto-fire effect to know which (introducer, introducee, po) combos are
+  // still missing a credit row, mirroring the creditedPairs check.
+  const introCreditedTriples = useMemo(() => {
+    const set = new Set<string>();
+    introducerCredits.forEach((ic) =>
+      set.add(`${ic.introducer_id}:${ic.introducee_id}:${ic.po_id}`)
+    );
+    return set;
+  }, [introducerCredits]);
+
+  // Live capital snapshot per investor — fed to creditIntroducerCommissions
+  // so its tier-rate calculation matches what calcIntroducerData uses on the
+  // tile (sum of introducees' current capital).
+  const capitalById = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const inv of investors) map.set(inv.id, inv.capital);
+    return map;
+  }, [investors]);
+
+  // introducedBy lookup — same investor list, just keyed for O(1) access in
+  // creditIntroducerCommissions where we need it per cycle-complete deployment.
+  const introducedByMap = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const inv of investors) map.set(inv.id, inv.introduced_by);
+    return map;
+  }, [investors]);
 
   // Ledger grouped by investor, newest first
   const ledgerByInvestor = useMemo(() => {
@@ -497,142 +575,177 @@ function InvestorsPageContent() {
   }, [ledgerRows]);
 
   // ── Credit returns handler ──────────────────────────────────
-  // Credits investor cash_balance for completed PO cycles that haven't been credited yet
+  // Fallback path: credits returns for any cleared PO in the current month
+  // whose (investor, PO) rows are missing. The primary path is the
+  // PO-cycle page firing creditPOReturns inline when admin types a clear
+  // date — this effect only catches stragglers (direct-SQL clears, older
+  // sessions that cleared before the PO-cycle inline fire existed).
+  //
+  // Each call passes po.commissions_cleared as p_credit_date so the
+  // return_credits row lands with the real earn date, not now().
 
-  async function handleCreditReturns() {
+  const handleCreditReturns = useCallback(async () => {
     setCrediting(true);
 
-    // Find POs with commissions_cleared set
-    const clearedPOs = monthPOs.filter((po) => po.commissions_cleared);
+    // Target any cleared PO (regardless of po_date month) that has at least
+    // one cycle-complete deployment row missing from return_credits. Using
+    // the full poolPOs — not just monthPOs — catches the case where a Feb
+    // PO cleared in March has a late-joiner backfill that needs crediting
+    // when the admin opens the March view.
+    const uncreditedPOIds = new Set(
+      deployments
+        .filter(
+          (d) =>
+            d.cycleComplete &&
+            !creditedPairs.has(`${d.investorId}:${d.poId}`)
+        )
+        .map((d) => d.poId)
+    );
+    const clearedPOs = poolPOs.filter(
+      (po) => po.commissions_cleared && uncreditedPOIds.has(po.id)
+    );
     if (clearedPOs.length === 0) {
       setCrediting(false);
       return;
     }
 
-    // Calculate deployments for this month (walk the full pool so prior-month
-    // in-flight capital is respected, but only this month's deployments come
-    // back from the function).
     const dInvestors = investors.map(toDeploymentInvestor);
     const dPOs = poolPOs.map(toDeploymentPO);
-    const { deployments: monthDeployments } = calcSharedDeployments(
-      dPOs,
-      dInvestors,
-      capitalEvents,
-      selectedMonth
-    );
 
-    // For each cleared PO, credit each investor via atomic RPC
     let credited = 0;
     for (const po of clearedPOs) {
-      const poDeps = monthDeployments.filter(
-        (d) => d.poId === po.id && d.cycleComplete
-      );
-      for (const dep of poDeps) {
-        const key = `${dep.investorId}:${dep.poId}`;
-        if (creditedPairs.has(key)) continue; // already credited
+      if (!po.commissions_cleared) continue;
+      const result = await creditPOReturns({
+        supabase,
+        poId: po.id,
+        clearDate: po.commissions_cleared,
+        investors: dInvestors,
+        poolPOs: dPOs,
+        capitalEvents,
+        alreadyCredited: creditedPairs,
+      });
+      credited += result.credited;
+      for (const err of result.errors) {
+        console.error("Credit RPC error:", err);
+      }
 
-        const { data, error } = await supabase.rpc("credit_investor_return", {
-          p_investor_id: dep.investorId,
-          p_po_id: dep.poId,
-          p_amount: dep.returnAmt,
-          p_deployed: dep.deployed,
-          p_tier_rate: dep.returnRate,
-        });
-
-        const result = data as {
-          success: boolean;
-          error?: string;
-          duplicate?: boolean;
-        } | null;
-        if (error) {
-          console.error("Credit RPC error:", error.message);
-          continue;
-        }
-        if (result?.duplicate) continue; // already credited, skip
-        if (result?.success) credited++;
+      // Same PO clear must also credit introducer commissions for any
+      // introducee whose return just landed. Runs after creditPOReturns so
+      // the introducer's tier (sum of introducees' capital) reflects any
+      // re-investment that just happened from this PO.
+      const introResult = await creditIntroducerCommissions({
+        supabase,
+        poId: po.id,
+        clearDate: po.commissions_cleared,
+        investors: dInvestors,
+        introducedBy: introducedByMap,
+        capitalById,
+        poolPOs: dPOs,
+        capitalEvents,
+        alreadyCredited: introCreditedTriples,
+      });
+      credited += introResult.credited;
+      for (const err of introResult.errors) {
+        console.error("Introducer credit RPC error:", err);
       }
     }
 
     setCrediting(false);
     if (credited > 0) fetchData();
-  }
+  }, [
+    deployments,
+    investors,
+    poolPOs,
+    capitalEvents,
+    creditedPairs,
+    introCreditedTriples,
+    introducedByMap,
+    capitalById,
+    supabase,
+    fetchData,
+  ]);
 
-  // ── Compound handler (admin force-compound) ──────────────────
+  // ── Auto-fire credit returns on page load ───────────────────
+  // Replaces the old "admin must click Credit Returns" flow. Whenever we
+  // detect any cleared PO with uncredited (investor, PO) deployment rows,
+  // fire the credit loop once. Idempotent server-side via
+  // UNIQUE(investor_id, po_id) on return_credits.
+  //
+  // The check is per-(investor, PO) pair, not per-PO. Older behaviour only
+  // asked "does this PO have ANY credit?" — which missed the case where Pass
+  // 1 credited investor A but Pass 2 had a backfill row for late-joiner B
+  // that never made it into return_credits. With per-pair, auto-fire runs
+  // whenever any deployment row lacks a matching return_credit, and the RPC
+  // skips duplicates, so historical gaps self-heal on the next page load
+  // without a separate migration.
 
-  async function handleCompoundInvestor(investor: DBInvestor) {
-    if ((investor.cash_balance ?? 0) <= 0) return;
-    setSaving(true);
-
-    const { data, error } = await supabase.rpc("reinvest_cash", {
-      p_investor_id: investor.id,
-      p_source: "admin",
+  const autoCreditedRef = useRef(false);
+  useEffect(() => {
+    if (loading || crediting || autoCreditedRef.current) return;
+    const hasUncreditedReturn = deployments.some(
+      (d) =>
+        d.cycleComplete &&
+        !creditedPairs.has(`${d.investorId}:${d.poId}`)
+    );
+    // An introducer commission can be missing even when the underlying
+    // return is already credited (e.g. backfill ran but no introducer
+    // existed at that time, or introduced_by was set after the fact).
+    // The auto-fire fires when *either* class of credit is missing.
+    const hasUncreditedIntro = deployments.some((d) => {
+      if (!d.cycleComplete) return false;
+      const introducerId = introducedByMap.get(d.investorId);
+      if (!introducerId || introducerId === d.investorId) return false;
+      return !introCreditedTriples.has(
+        `${introducerId}:${d.investorId}:${d.poId}`
+      );
     });
-
-    const result = data as { success: boolean; error?: string } | null;
-    if (error || !result?.success) {
-      console.error("Compound failed:", error?.message || result?.error);
-    }
-
-    setSaving(false);
-    fetchData();
-  }
+    if (!hasUncreditedReturn && !hasUncreditedIntro) return;
+    autoCreditedRef.current = true;
+    void handleCreditReturns();
+  }, [
+    loading,
+    crediting,
+    deployments,
+    creditedPairs,
+    introCreditedTriples,
+    introducedByMap,
+    handleCreditReturns,
+  ]);
 
   // ── Withdrawal approval handlers ────────────────────────────
+  // Under Option C there is only 'capital' type. All three handlers go
+  // through the migration-008 RPCs so they correctly operate on capital
+  // (the RPC handles the debit/refund atomically).
 
   async function handleApproveWithdrawal(withdrawal: DBWithdrawal) {
     setSaving(true);
-
-    // Cash balance was already deducted when the investor submitted the request.
-    // Approve just updates the withdrawal status.
-    await supabase
-      .from("withdrawals")
-      .update({
-        status: "approved" as const,
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq("id", withdrawal.id);
-
+    const { data, error } = await supabase.rpc("approve_withdrawal", {
+      p_withdrawal_id: withdrawal.id,
+    });
+    const result = data as { success: boolean; error?: string } | null;
+    if (error || !result?.success) {
+      console.error(
+        "Approve withdrawal failed:",
+        error?.message || result?.error
+      );
+    }
     setSaving(false);
     fetchData();
   }
 
   async function handleRejectWithdrawal(withdrawalId: string, notes?: string) {
     setSaving(true);
-
-    // Restore cash_balance since it was deducted when the request was submitted
-    const withdrawal = withdrawals.find((w) => w.id === withdrawalId);
-    if (withdrawal) {
-      const investor = investors.find((i) => i.id === withdrawal.investor_id);
-      if (investor) {
-        const restoredBalance = (investor.cash_balance ?? 0) + withdrawal.amount;
-        await supabase
-          .from("investors")
-          .update({ cash_balance: restoredBalance })
-          .eq("id", investor.id);
-      }
+    const { data, error } = await supabase.rpc("reject_withdrawal", {
+      p_withdrawal_id: withdrawalId,
+      p_admin_notes: notes,
+    });
+    const result = data as { success: boolean; error?: string } | null;
+    if (error || !result?.success) {
+      console.error(
+        "Reject withdrawal failed:",
+        error?.message || result?.error
+      );
     }
-
-    await supabase
-      .from("withdrawals")
-      .update({
-        status: "rejected" as const,
-        reviewed_at: new Date().toISOString(),
-        notes: notes || null,
-      })
-      .eq("id", withdrawalId);
-    setSaving(false);
-    fetchData();
-  }
-
-  async function handleCompleteWithdrawal(withdrawalId: string) {
-    setSaving(true);
-    await supabase
-      .from("withdrawals")
-      .update({
-        status: "completed" as const,
-        processed_at: new Date().toISOString(),
-      })
-      .eq("id", withdrawalId);
     setSaving(false);
     fetchData();
   }
@@ -815,7 +928,7 @@ function InvestorsPageContent() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-7 gap-3">
+      <div className="grid grid-cols-6 gap-3">
         <MetricCard
           label="Investors"
           value={String(investors.length)}
@@ -837,16 +950,6 @@ function InvestorsPageContent() {
           color={totalIdle > 0 ? "amber" : "default"}
         />
         <MetricCard
-          label="Cash Balance"
-          value={fmt(totalCashBalance)}
-          subtitle={
-            pendingWithdrawals.length > 0
-              ? `${pendingWithdrawals.length} pending withdrawal${pendingWithdrawals.length > 1 ? "s" : ""}`
-              : undefined
-          }
-          color="brand"
-        />
-        <MetricCard
           label="Returns Earned"
           value={fmt(totalReturnsEarned)}
           subtitle={
@@ -858,7 +961,12 @@ function InvestorsPageContent() {
         />
         <MetricCard
           label="Intro Commissions"
-          value={fmt(totalIntroComm)}
+          value={fmt(totalIntroCommEarned)}
+          subtitle={
+            totalIntroCommPending > 0
+              ? `${fmt(totalIntroCommPending)} pending`
+              : undefined
+          }
           color="purple"
         />
       </div>
@@ -879,7 +987,7 @@ function InvestorsPageContent() {
                 {uncreditedCount} uncredited return{uncreditedCount > 1 ? "s" : ""} from cleared POs
               </p>
               <p className="text-xs text-brand-600">
-                Credit returns to investor cash balances. Auto-compounds in 7 days if not withdrawn.
+                Credit returns straight to investor capital. Fires automatically on page load — this button is a manual retry.
               </p>
             </div>
             <Button
@@ -977,9 +1085,6 @@ function InvestorsPageContent() {
                   Idle
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
-                  Cash Bal
-                </TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
                   Returns
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wider text-gray-500">
@@ -1018,7 +1123,6 @@ function InvestorsPageContent() {
                     }
                     onEdit={() => openEditDialog(investor)}
                     onRequestDelete={() => openDeleteDialog(investor)}
-                    onCompound={() => handleCompoundInvestor(investor)}
                     onRecordDeposit={() => openDepositDialog(investor)}
                   />
                 );
@@ -1063,7 +1167,13 @@ function InvestorsPageContent() {
                       Investor Returns
                     </TableHead>
                     <TableHead className="text-[10px] uppercase tracking-wider text-purple-600">
-                      Commission
+                      Earned
+                    </TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wider text-purple-600">
+                      Pending
+                    </TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wider text-purple-600">
+                      Total
                     </TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1085,6 +1195,14 @@ function InvestorsPageContent() {
                       <TableCell className="font-mono text-xs text-accent-600">
                         {fmt(d.totalReturns)}
                       </TableCell>
+                      <TableCell className="font-mono text-xs font-medium text-success-600">
+                        {fmt(d.commissionEarned)}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-amber-600">
+                        {d.commissionPending > 0
+                          ? fmt(d.commissionPending)
+                          : "--"}
+                      </TableCell>
                       <TableCell className="font-mono text-xs font-medium text-purple-600">
                         {fmt(d.commission)}
                       </TableCell>
@@ -1093,8 +1211,9 @@ function InvestorsPageContent() {
                 </TableBody>
               </Table>
               <p className="mt-3 text-[10px] text-gray-500">
-                Tier based on total capital introduced. Commission = tier% of
-                actual investor returns from completed cycles only.
+                Tier based on total capital introduced. Earned = credited to
+                capital from cleared cycles. Pending = forecast at current
+                tier rate for cycles still in flight.
               </p>
             </div>
           )}
@@ -1202,17 +1321,9 @@ function InvestorsPageContent() {
                                 </Button>
                               </>
                             )}
-                            {w.status === "approved" && (
-                              <Button
-                                size="xs"
-                                className="bg-brand-600 text-white hover:bg-brand-800"
-                                onClick={() => handleCompleteWithdrawal(w.id)}
-                                disabled={saving}
-                              >
-                                <ArrowDownToLine className="size-3" />
-                                Mark Paid
-                              </Button>
-                            )}
+                            {/* 'approved' is transient — approve_withdrawal
+                                RPC moves status straight to 'completed'.
+                                No manual Mark Paid step remains. */}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1500,7 +1611,6 @@ function InvestorRow({
   onToggleExpand,
   onEdit,
   onRequestDelete,
-  onCompound,
   onRecordDeposit,
 }: {
   investor: DBInvestor;
@@ -1513,7 +1623,6 @@ function InvestorRow({
   onToggleExpand: () => void;
   onEdit: () => void;
   onRequestDelete: () => void;
-  onCompound: () => void;
   onRecordDeposit: () => void;
 }) {
   return (
@@ -1554,29 +1663,6 @@ function InvestorRow({
           )}
         >
           {fmt(stats?.idle ?? 0)}
-        </TableCell>
-        <TableCell>
-          {(investor.cash_balance ?? 0) > 0 ? (
-            <div className="flex items-center gap-1.5">
-              <span className="font-mono text-xs font-medium text-brand-600">
-                {fmt(investor.cash_balance ?? 0)}
-              </span>
-              <button
-                type="button"
-                title="Compound now"
-                className="rounded p-0.5 text-brand-400 transition-colors hover:bg-brand-50 hover:text-brand-600"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCompound();
-                }}
-                disabled={saving}
-              >
-                <RefreshCw className="size-3" />
-              </button>
-            </div>
-          ) : (
-            <span className="font-mono text-xs text-gray-400">--</span>
-          )}
         </TableCell>
         <TableCell className="font-mono text-sm font-medium text-accent-600">
           {(stats?.totalReturns ?? 0) > 0
@@ -1622,7 +1708,7 @@ function InvestorRow({
       {/* Expanded detail */}
       {isExpanded && stats && (
         <TableRow className="bg-accent-50/20 hover:bg-accent-50/20">
-          <TableCell colSpan={13} className="p-0">
+          <TableCell colSpan={12} className="p-0">
             <div className="space-y-4 p-5">
               {/* Tier progress */}
               <div className="max-w-xs">
@@ -1740,7 +1826,7 @@ function InvestorRow({
               </div>
 
               {/* Returns summary */}
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div className="rounded-lg border border-success-100 bg-success-50/30 px-4 py-3">
                   <p className="text-[10px] font-medium uppercase tracking-wider text-success-600">
                     Earned (Completed)
@@ -1773,36 +1859,6 @@ function InvestorRow({
                   <p className="mt-0.5 text-[10px] text-gray-500">
                     at {tier.rate}% per cycle
                   </p>
-                </div>
-                {/* Cash Balance card */}
-                <div className="rounded-lg border border-brand-100 bg-brand-50/30 px-4 py-3">
-                  <p className="text-[10px] font-medium uppercase tracking-wider text-brand-600">
-                    Cash Balance
-                  </p>
-                  <p className="mt-1 font-mono text-base font-medium text-brand-600">
-                    {fmt(investor.cash_balance ?? 0)}
-                  </p>
-                  {(investor.cash_balance ?? 0) > 0 && (
-                    <>
-                      <p className="mt-0.5 text-[10px] text-gray-500">
-                        {investor.compound_at
-                          ? `Compounds in ${daysUntilCompound(investor.compound_at) ?? 0} day(s)`
-                          : "Ready to compound"}
-                      </p>
-                      <Button
-                        size="xs"
-                        className="mt-2 bg-brand-600 text-white hover:bg-brand-800"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCompound();
-                        }}
-                        disabled={saving}
-                      >
-                        <RefreshCw className="size-3" />
-                        Compound Now
-                      </Button>
-                    </>
-                  )}
                 </div>
               </div>
 
@@ -1874,14 +1930,14 @@ function LedgerTableRow({ row }: { row: LedgerRow }) {
     deposit: "Deposit",
     withdrawal: "Withdrawal",
     return_credit: "Return",
-    compound: "Compound",
+    introducer_credit: "Introducer Commission",
     admin_adjustment: "Admin Adjustment",
   };
   const kindColor: Record<string, string> = {
     deposit: "text-success-600",
     withdrawal: "text-danger-600",
     return_credit: "text-accent-600",
-    compound: "text-gray-500",
+    introducer_credit: "text-purple-600",
     admin_adjustment: "text-amber-600",
   };
   const kind = row.kind ?? "";
@@ -2102,7 +2158,7 @@ function DeleteInvestorDialog({
               {investor?.name ?? ""}
             </span>{" "}
             and cascades to their deposits, admin adjustments, withdrawals,
-            return credits, and compound log. There is no undo.
+            return credits, and admin adjustments. There is no undo.
           </DialogDescription>
         </DialogHeader>
 

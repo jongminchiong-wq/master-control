@@ -46,7 +46,16 @@ export default function PlayerSimulatorPage() {
         .eq("user_id", user.id)
         .single();
 
-      if (playerData) setMyPlayer(playerData);
+      if (playerData) {
+        // DB columns are CHECK-constrained to 'A' | 'B' but Supabase's
+        // generated types widen them to string; narrow at the boundary.
+        const narrow = (v: string | null): "A" | "B" | null =>
+          v === "A" || v === "B" ? v : null;
+        setMyPlayer({
+          eu_tier_mode: narrow(playerData.eu_tier_mode),
+          intro_tier_mode: narrow(playerData.intro_tier_mode),
+        });
+      }
     }
     fetchPlayer();
   }, [supabase]);

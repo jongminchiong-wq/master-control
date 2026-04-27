@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import type { Tables, LedgerRow } from "@/lib/supabase/types";
+import type { Database, Tables, LedgerRow } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 // Business logic
@@ -11,19 +12,13 @@ import { INV_TIERS, INV_INTRO_TIERS } from "@/lib/business-logic/constants";
 import { getTier } from "@/lib/business-logic/tiers";
 import {
   calcSharedDeployments,
+  overlayReturnCredits,
   type DeploymentPO,
   type DeploymentInvestor,
-  type CapitalEvent,
 } from "@/lib/business-logic/deployment";
+import { buildCapitalEvents } from "@/lib/business-logic/capital-events";
 import { calcFundingStatus } from "@/lib/business-logic/funding-status";
 import { fmt } from "@/lib/business-logic/formatters";
-import {
-  shouldAutoCompound,
-  daysUntilCompound,
-  wouldUpgradeTier,
-  estimateAnnualCompound,
-  COMPOUND_WINDOW_DAYS,
-} from "@/lib/business-logic/compounding";
 
 // Shared components
 import { TierCard } from "@/components/tier-card";
@@ -31,7 +26,6 @@ import { FundingOpportunities } from "@/components/funding-opportunities";
 
 // UI components
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Table,
   TableHeader,
@@ -63,9 +57,6 @@ import {
   TrendingUp,
   Users,
   ArrowRight,
-  Wallet,
-  RefreshCw,
-  ArrowDownToLine,
   Clock,
   History,
 } from "lucide-react";
@@ -77,8 +68,16 @@ type DBWithdrawal = Tables<"withdrawals">;
 type DBPO = Tables<"purchase_orders"> & {
   delivery_orders: Tables<"delivery_orders">[];
 };
-type DBCompoundLog = Tables<"compound_log">;
-type DBDeposit = Tables<"deposits">;
+type DBAdminAdjustment = Tables<"admin_adjustments">;
+type DBReturnCredit = Tables<"return_credits">;
+type DBIntroducerCredit = Tables<"introducer_credits">;
+// Pool-wide event rows from the views added in migration 013. The investor
+// session is RLS-clipped on the underlying `deposits` and `introducer_credits`
+// tables, so the allocator-feeding fetches go through these sanitised views
+// to recover pool-wide visibility without leaking PII columns.
+type DBDepositEvent = Database["public"]["Views"]["v_deposit_events"]["Row"];
+type DBIntroducerCreditEvent =
+  Database["public"]["Views"]["v_introducer_credit_events"]["Row"];
 
 // ── DB → Business-logic mappers ─────────────────────────────
 
@@ -107,7 +106,7 @@ function toDeploymentInvestor(inv: DBInvestor): DeploymentInvestor {
 
 // ── Cycle status helpers ────────────────────────────────────
 
-type CycleStatus = "complete" | "active";
+type CycleStatus = "complete" | "active" | "cleared" | "pending";
 
 const cycleStatusConfig: Record<
   CycleStatus,
@@ -119,6 +118,12 @@ const cycleStatusConfig: Record<
     text: "text-success-800",
   },
   active: { label: "Active", bg: "bg-amber-50", text: "text-amber-600" },
+  cleared: {
+    label: "Cleared",
+    bg: "bg-success-50",
+    text: "text-success-800",
+  },
+  pending: { label: "Pending", bg: "bg-amber-50", text: "text-amber-600" },
 };
 
 function CycleStatusBadge({ status }: { status: CycleStatus }) {
@@ -145,8 +150,23 @@ export default function InvestorDashboardPage() {
   const [myInvestor, setMyInvestor] = useState<DBInvestor | null>(null);
   const [allInvestors, setAllInvestors] = useState<DBInvestor[]>([]);
   const [allPOs, setAllPOs] = useState<DBPO[]>([]);
-  const [compoundLogs, setCompoundLogs] = useState<DBCompoundLog[]>([]);
-  const [deposits, setDeposits] = useState<DBDeposit[]>([]);
+  // depositEvents/introducerCreditEvents come from migration-013 views — they
+  // contain only the columns the allocator needs and are pool-wide for any
+  // authenticated user. introducerCredits (full row) is still fetched
+  // separately for the personal recruit-data section, where introducee_id /
+  // tier_rate are needed and RLS-clipping to "my own credits" is correct.
+  const [depositEvents, setDepositEvents] = useState<DBDepositEvent[]>([]);
+  const [allWithdrawals, setAllWithdrawals] = useState<DBWithdrawal[]>([]);
+  const [adminAdjustments, setAdminAdjustments] = useState<DBAdminAdjustment[]>(
+    []
+  );
+  const [returnCredits, setReturnCredits] = useState<DBReturnCredit[]>([]);
+  const [introducerCredits, setIntroducerCredits] = useState<
+    DBIntroducerCredit[]
+  >([]);
+  const [introducerCreditEvents, setIntroducerCreditEvents] = useState<
+    DBIntroducerCreditEvent[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [errorState, setErrorState] = useState<
     "not_authenticated" | "no_investor" | null
@@ -158,18 +178,14 @@ export default function InvestorDashboardPage() {
   const [introOpen, setIntroOpen] = useState(false);
   const [withdrawalsOpen, setWithdrawalsOpen] = useState(false);
   const [ledgerOpen, setLedgerOpen] = useState(false);
-  const [topUpOpen, setTopUpOpen] = useState(false);
+  const router = useRouter();
+  const goDeposit = useCallback(() => router.push("/wallet?deposit=1"), [router]);
 
   // Capital history
   const [myLedger, setMyLedger] = useState<LedgerRow[]>([]);
 
-  // Withdrawal dialog state
-  const [showWithdrawDialog, setShowWithdrawDialog] = useState(false);
-  const [withdrawAmount, setWithdrawAmount] = useState("");
-  const [withdrawing, setWithdrawing] = useState(false);
-  const [reinvesting, setReinvesting] = useState(false);
-
-  // Withdrawal history
+  // Withdrawal history (investor's own). Capital withdrawals happen on
+  // the Wallet page under Option C — Portfolio is read-only for wallet state.
   const [myWithdrawals, setMyWithdrawals] = useState<DBWithdrawal[]>([]);
 
   // ── Data fetching ─────────────────────────────────────────
@@ -204,69 +220,84 @@ export default function InvestorDashboardPage() {
     const [
       investorsRes,
       posRes,
-      withdrawalsRes,
+      myWithdrawalsRes,
+      allWithdrawalsRes,
       ledgerRes,
-      compoundLogRes,
-      depositsRes,
+      depositEventsRes,
+      adjustmentsRes,
+      returnCreditsRes,
+      introducerCreditsRes,
+      introducerCreditEventsRes,
     ] = await Promise.all([
-        supabase
-          .from("investors")
-          .select("*")
-          .order("created_at", { ascending: true }),
-        supabase
-          .from("purchase_orders")
-          .select("*, delivery_orders(*)")
-          .order("po_date", { ascending: true }),
-        supabase
-          .from("withdrawals")
-          .select("*")
-          .eq("investor_id", investorData.id)
-          .order("requested_at", { ascending: false }),
-        supabase
-          .from("v_investor_ledger")
-          .select("*")
-          .eq("investor_id", investorData.id)
-          .order("at", { ascending: false }),
-        // All investors' compound_log — needed because the deployment pool
-        // allocates proportionally across all investors. RLS must allow
-        // investors to read sibling rows for this to return useful data.
-        supabase
-          .from("compound_log")
-          .select("*")
-          .order("created_at", { ascending: true }),
-        // All investors' deposits for the same reason. RLS must allow
-        // investors to read sibling deposit rows.
-        supabase
-          .from("deposits")
-          .select("*")
-          .order("deposited_at", { ascending: true }),
-      ]);
+      supabase
+        .from("investors")
+        .select("*")
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("purchase_orders")
+        .select("*, delivery_orders(*)")
+        .order("po_date", { ascending: true }),
+      supabase
+        .from("withdrawals")
+        .select("*")
+        .eq("investor_id", investorData.id)
+        .order("requested_at", { ascending: false }),
+      // Pool-wide capital events for the allocator seed (009 grants RLS).
+      supabase
+        .from("withdrawals")
+        .select("*")
+        .order("requested_at", { ascending: true }),
+      supabase
+        .from("v_investor_ledger")
+        .select("*")
+        .eq("investor_id", investorData.id)
+        .order("at", { ascending: false }),
+      // Pool-wide deposit events via the migration-013 view. The underlying
+      // `deposits` table is RLS-clipped to own rows for non-admins; the view
+      // exposes only investor_id/deposited_at/amount across all investors so
+      // the shared allocator's seed math stays consistent with admin.
+      supabase
+        .from("v_deposit_events")
+        .select("*")
+        .order("deposited_at", { ascending: true }),
+      supabase
+        .from("admin_adjustments")
+        .select("*")
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("return_credits")
+        .select("*")
+        .order("created_at", { ascending: true }),
+      // Personal introducer_credits (full row) — RLS clips this to rows where
+      // I am the introducer, which is exactly what the recruit-data section
+      // below needs (introducee_id, locked tier_rate per credited PO).
+      supabase
+        .from("introducer_credits")
+        .select("*")
+        .order("created_at", { ascending: true }),
+      // Pool-wide introducer-credit events via the migration-013 view. Same
+      // rationale as v_deposit_events — the allocator needs every investor's
+      // credit history to compute the right `remaining` seed; this view
+      // exposes only the four columns it consumes (no introducee_id /
+      // base_return / tier_rate leak).
+      supabase
+        .from("v_introducer_credit_events")
+        .select("*")
+        .order("created_at", { ascending: true }),
+    ]);
 
     if (investorsRes.data) setAllInvestors(investorsRes.data);
     if (posRes.data) setAllPOs(posRes.data as DBPO[]);
-    if (withdrawalsRes.data) setMyWithdrawals(withdrawalsRes.data);
+    if (myWithdrawalsRes.data) setMyWithdrawals(myWithdrawalsRes.data);
+    if (allWithdrawalsRes.data) setAllWithdrawals(allWithdrawalsRes.data);
     if (ledgerRes.data) setMyLedger(ledgerRes.data);
-    if (compoundLogRes.data) setCompoundLogs(compoundLogRes.data);
-    if (depositsRes.data) setDeposits(depositsRes.data);
-
-    // Auto-compound on read: if compound window has passed, compound automatically
-    if (
-      investorData.cash_balance > 0 &&
-      shouldAutoCompound(investorData.compound_at)
-    ) {
-      await supabase.rpc("reinvest_cash", {
-        p_investor_id: investorData.id,
-        p_source: "auto",
-      });
-
-      // Refresh investor data after compound
-      const { data: refreshed } = await supabase
-        .from("investors")
-        .select("*")
-        .eq("id", investorData.id)
-        .single();
-      if (refreshed) setMyInvestor(refreshed);
-    }
+    if (depositEventsRes.data) setDepositEvents(depositEventsRes.data);
+    if (adjustmentsRes.data) setAdminAdjustments(adjustmentsRes.data);
+    if (returnCreditsRes.data) setReturnCredits(returnCreditsRes.data);
+    if (introducerCreditsRes.data)
+      setIntroducerCredits(introducerCreditsRes.data);
+    if (introducerCreditEventsRes.data)
+      setIntroducerCreditEvents(introducerCreditEventsRes.data);
 
     setLoading(false);
   }, [supabase]);
@@ -290,30 +321,30 @@ export default function InvestorDashboardPage() {
     [allInvestors]
   );
 
-  // Capital-change events from both compound_log (reinvests) and deposits.
-  // The allocator needs deposits as timeline events too — without them, a
-  // late deposit would retroactively fund an earlier PO (time-travel).
-  const capitalEvents = useMemo<CapitalEvent[]>(
-    () => [
-      ...compoundLogs
-        .filter((log) => log.created_at)
-        .map((log) => ({
-          investorId: log.investor_id,
-          date: (log.created_at as string).slice(0, 10),
-          delta: log.capital_after - log.capital_before,
-        })),
-      ...deposits
-        .filter((d) => d.deposited_at && d.investor_id)
-        .map((d) => ({
-          investorId: d.investor_id,
-          date: d.deposited_at,
-          delta: Number(d.amount),
-        })),
-    ],
-    [compoundLogs, deposits]
+  // Every investors.capital mutation fed as a timeline event so the
+  // allocator's `remaining` seed starts at true initial capital. See
+  // lib/business-logic/capital-events.ts.
+  const capitalEvents = useMemo(
+    () =>
+      buildCapitalEvents({
+        deposits: depositEvents,
+        withdrawals: allWithdrawals,
+        adminAdjustments,
+        returnCredits,
+        introducerCredits: introducerCreditEvents,
+        pos: allPOs,
+      }),
+    [
+      depositEvents,
+      allWithdrawals,
+      adminAdjustments,
+      returnCredits,
+      introducerCreditEvents,
+      allPOs,
+    ]
   );
 
-  const { deployments: allDeployments, remaining } = useMemo(
+  const { deployments: rawAllDeployments, remaining } = useMemo(
     () =>
       calcSharedDeployments(
         deploymentPOs,
@@ -321,6 +352,15 @@ export default function InvestorDashboardPage() {
         capitalEvents
       ),
     [deploymentPOs, deploymentInvestors, capitalEvents]
+  );
+
+  // Overlay frozen return_credits so completed cycles show the rate/amount
+  // that was actually paid at clearance — the Investment Returns modal and
+  // Cycle History table both derive from this. See deployment.ts for the
+  // full rationale (tier-at-current-capital vs tier-at-clearance drift).
+  const allDeployments = useMemo(
+    () => overlayReturnCredits(rawAllDeployments, returnCredits),
+    [rawAllDeployments, returnCredits]
   );
 
   // ── Computed: platform funding status (pool-wide) ─────────
@@ -424,7 +464,7 @@ export default function InvestorDashboardPage() {
   const introTier = getTier(totalCapitalIntroduced, INV_INTRO_TIERS);
 
   const recruitData = useMemo(() => {
-    if (myRecruits.length === 0) return [];
+    if (myRecruits.length === 0 || !myInvestor) return [];
     return myRecruits.map((recruit) => {
       const recruitDeps = allDeployments.filter(
         (d) => d.investorId === recruit.id
@@ -435,16 +475,28 @@ export default function InvestorDashboardPage() {
       const rReturnsPending = recruitDeps
         .filter((d) => !d.cycleComplete)
         .reduce((s, d) => s + d.returnAmt, 0);
-      const commEarned = rReturnsEarned * (introTier.rate / 100);
+      // Earned commission from this recruit comes from credited rows. Each
+      // row carries its locked tier_rate from the moment the underlying PO
+      // cleared, so a tier upgrade later doesn't retroactively rewrite the
+      // displayed value.
+      const commEarned = introducerCredits
+        .filter(
+          (ic) =>
+            ic.introducer_id === myInvestor.id &&
+            ic.introducee_id === recruit.id
+        )
+        .reduce((s, ic) => s + Number(ic.amount), 0);
+      // Pending stays a forward estimate at the *current* tier rate.
       const commPending = rReturnsPending * (introTier.rate / 100);
-      const allComplete =
-        recruitDeps.length > 0 && recruitDeps.every((d) => d.cycleComplete);
+      // Status reflects commission state, not cycle state: once an amount
+      // has been credited via introducer_credits it is permanently cleared,
+      // even if the same recruit later starts another cycle.
       const commStatus: CycleStatus =
-        recruitDeps.length === 0
-          ? "active"
-          : allComplete
-            ? "complete"
-            : "active";
+        commEarned > 0 && commPending === 0
+          ? "cleared"
+          : commEarned > 0 && commPending > 0
+            ? "active"
+            : "pending";
       return {
         name: recruit.name,
         capital: recruit.capital,
@@ -455,7 +507,7 @@ export default function InvestorDashboardPage() {
         commStatus,
       };
     });
-  }, [myRecruits, allDeployments, introTier.rate]);
+  }, [myRecruits, allDeployments, introTier.rate, introducerCredits, myInvestor]);
 
   const totalIntroCommEarned = recruitData.reduce(
     (s, r) => s + r.commEarned,
@@ -467,69 +519,24 @@ export default function InvestorDashboardPage() {
   );
   const totalIntroComm = totalIntroCommEarned + totalIntroCommPending;
 
-  // ── Cash balance helpers ──────────────────────────────────
+  // ── Lifetime metrics ──────────────────────────────────────
+  // Under Option C, the "Deployed" card shows capital currently locked.
+  // For total-ever-deployed and total-ever-earned we use:
+  //   - Lifetime Deployed: sum of every deployment row (all time, never drops)
+  //   - Lifetime Returns: sum of return_credits for this investor (permanent
+  //     audit log — credit bumps capital, row persists)
 
-  const cashBalance = myInvestor?.cash_balance ?? 0;
-  const compoundDaysLeft = daysUntilCompound(myInvestor?.compound_at ?? null);
-  const tierUpgrade = myInvestor
-    ? wouldUpgradeTier(myInvestor.capital, cashBalance)
-    : null;
+  const lifetimeDeployed = useMemo(
+    () => myDeployments.reduce((s, d) => s + d.deployed, 0),
+    [myDeployments]
+  );
 
-  // ── Withdrawal handler ──────────────────────────────────
-
-  async function handleWithdraw() {
-    if (!myInvestor) return;
-    const amount = parseFloat(withdrawAmount);
-    if (!amount || amount <= 0 || amount > cashBalance) return;
-
-    setWithdrawing(true);
-
-    const { data, error } = await supabase.rpc("submit_withdrawal", {
-      p_investor_id: myInvestor.id,
-      p_amount: amount,
-      p_type: "returns",
-    });
-
-    const result = data as { success: boolean; error?: string } | null;
-    if (error || !result?.success) {
-      console.error("Withdrawal failed:", error?.message || result?.error);
-    }
-
-    setWithdrawing(false);
-    setShowWithdrawDialog(false);
-    setWithdrawAmount("");
-    fetchData();
-  }
-
-  // ── Reinvest handler ────────────────────────────────────
-
-  async function handleReinvest() {
-    if (!myInvestor || cashBalance <= 0) return;
-
-    setReinvesting(true);
-
-    const { data: reinvestData, error: reinvestError } = await supabase.rpc(
-      "reinvest_cash",
-      {
-        p_investor_id: myInvestor.id,
-        p_source: "manual_reinvest",
-      }
-    );
-
-    const reinvestResult = reinvestData as {
-      success: boolean;
-      error?: string;
-    } | null;
-    if (reinvestError || !reinvestResult?.success) {
-      console.error(
-        "Reinvest failed:",
-        reinvestError?.message || reinvestResult?.error
-      );
-    }
-
-    setReinvesting(false);
-    fetchData();
-  }
+  const lifetimeReturns = useMemo(() => {
+    if (!myInvestor) return 0;
+    return returnCredits
+      .filter((rc) => rc.investor_id === myInvestor.id)
+      .reduce((s, rc) => s + Number(rc.amount), 0);
+  }, [returnCredits, myInvestor]);
 
   // ── Loading state ─────────────────────────────────────────
 
@@ -644,62 +651,9 @@ export default function InvestorDashboardPage() {
         investorTierRate={myTier.rate}
         investorTierName={myTier.name}
         idleCapital={idle}
-        onFund={() => setTopUpOpen(true)}
-        onTopUp={() => setTopUpOpen(true)}
+        onFund={goDeposit}
+        onTopUp={goDeposit}
       />
-
-      {/* ═══ CASH BALANCE CARD ═══ */}
-      {cashBalance > 0 && (
-        <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)] ring-1 ring-brand-200">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <div className="flex size-8 items-center justify-center rounded-lg bg-brand-50">
-                  <Wallet className="size-4 text-brand-600" strokeWidth={1.5} />
-                </div>
-                <p className="text-sm font-medium text-gray-800">Cash Balance</p>
-              </div>
-              <p className="mt-3 font-mono text-2xl font-semibold text-brand-600">
-                {fmt(cashBalance)}
-              </p>
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-500">
-                <Clock className="size-3" />
-                {compoundDaysLeft !== null && compoundDaysLeft > 0
-                  ? `Auto-compounds in ${compoundDaysLeft} day${compoundDaysLeft > 1 ? "s" : ""}`
-                  : "Ready to compound"}
-              </div>
-              {tierUpgrade?.upgrades && (
-                <p className="mt-2 text-xs font-medium text-brand-600">
-                  Reinvesting unlocks {tierUpgrade.to.name} tier ({tierUpgrade.to.rate}%)
-                </p>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-gray-600"
-                onClick={() => {
-                  setWithdrawAmount("");
-                  setShowWithdrawDialog(true);
-                }}
-              >
-                <ArrowDownToLine className="size-3.5" data-icon="inline-start" />
-                Withdraw
-              </Button>
-              <Button
-                size="sm"
-                className="bg-brand-600 text-white hover:bg-brand-800"
-                onClick={handleReinvest}
-                disabled={reinvesting}
-              >
-                <RefreshCw className="size-3.5" data-icon="inline-start" />
-                {reinvesting ? "Reinvesting..." : "Reinvest Now"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Pending withdrawals notice */}
       {myWithdrawals.some((w) => w.status === "pending") && (
@@ -722,10 +676,10 @@ export default function InvestorDashboardPage() {
       <div
         className={cn(
           "grid gap-4",
-          myRecruits.length > 0 ? "grid-cols-3" : "grid-cols-2"
+          myRecruits.length > 0 ? "grid-cols-4" : "grid-cols-3"
         )}
       >
-        {/* Card 1: Deployed */}
+        {/* Card 1: Deployed (currently locked) */}
         <button
           type="button"
           onClick={() => setDeploymentsOpen(true)}
@@ -739,8 +693,7 @@ export default function InvestorDashboardPage() {
             {fmt(totalDeployed)}
           </p>
           <p className="mt-1 text-xs text-gray-500">
-            {myDeployments.length} PO{myDeployments.length !== 1 ? "s" : ""}{" "}
-            &middot; {utilisationPct}% utilised
+            Currently in live POs &middot; {utilisationPct}% utilised
           </p>
           <div className="mt-4 flex items-center gap-1.5 border-t border-gray-100 pt-4 text-sm font-semibold text-brand-600">
             View deployments
@@ -748,7 +701,22 @@ export default function InvestorDashboardPage() {
           </div>
         </button>
 
-        {/* Card 2: Investment Returns */}
+        {/* Card 2: Lifetime Deployed — sum of every cycle ever, never drops */}
+        <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+          <div className="mb-4 flex size-10 items-center justify-center rounded-xl bg-brand-50">
+            <DollarSign className="size-5 text-brand-600" strokeWidth={1.5} />
+          </div>
+          <p className="text-xs font-medium text-gray-500">Lifetime Deployed</p>
+          <p className="mt-1 font-mono text-xl font-semibold text-brand-600">
+            {fmt(lifetimeDeployed)}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            {myDeployments.length} cycle
+            {myDeployments.length !== 1 ? "s" : ""} total
+          </p>
+        </div>
+
+        {/* Card 3: Lifetime Returns — from return_credits, never drops */}
         <button
           type="button"
           onClick={() => setReturnsOpen(true)}
@@ -760,20 +728,13 @@ export default function InvestorDashboardPage() {
               strokeWidth={1.5}
             />
           </div>
-          <p className="text-xs font-medium text-gray-500">
-            Investment Returns
-          </p>
+          <p className="text-xs font-medium text-gray-500">Lifetime Returns</p>
           <p className="mt-1 font-mono text-xl font-semibold text-accent-600">
-            {fmt(totalReturns + pendingReturns)}
+            {fmt(lifetimeReturns)}
           </p>
-          <div className="mt-1 flex gap-2">
-            <span className="text-xs font-medium text-success-600">
-              {fmt(totalReturns)} earned
-            </span>
-            <span className="text-xs font-medium text-amber-600">
-              {fmt(pendingReturns)} pending
-            </span>
-          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Credited to capital &middot; grows forever
+          </p>
           <div className="mt-4 flex items-center gap-1.5 border-t border-gray-100 pt-4 text-sm font-semibold text-accent-600">
             View cycle history
             <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
@@ -831,24 +792,6 @@ export default function InvestorDashboardPage() {
           color="brand"
           label="per cycle"
         />
-        {/* Compound projection */}
-        {myInvestor.capital > 0 && (() => {
-          const projection = estimateAnnualCompound(myInvestor.capital, 60);
-          return (
-            <div className="mt-4 rounded-lg bg-brand-50/50 px-4 py-3">
-              <p className="text-xs font-medium text-brand-800">
-                Compound Projection (12 months)
-              </p>
-              <p className="mt-1 text-xs text-brand-600">
-                At the current rate with auto-compounding, your{" "}
-                <span className="font-mono font-medium">{fmt(myInvestor.capital)}</span>{" "}
-                could grow to{" "}
-                <span className="font-mono font-semibold">{fmt(projection.finalCapital)}</span>{" "}
-                ({projection.annualPct.toFixed(1)}% effective annual return).
-              </p>
-            </div>
-          );
-        })()}
       </div>
 
       {/* ═══ SIMULATOR TEASER ═══ */}
@@ -877,7 +820,7 @@ export default function InvestorDashboardPage() {
             <DialogDescription>
               {myDeployments.length} PO
               {myDeployments.length !== 1 ? "s" : ""} &middot;{" "}
-              {fmt(totalDeployed)} deployed &middot; {utilisationPct}% utilised
+              {fmt(lifetimeDeployed)} lifetime
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[65vh] overflow-y-auto">
@@ -931,7 +874,7 @@ export default function InvestorDashboardPage() {
                       Total
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs font-medium text-brand-600">
-                      {fmt(totalDeployed)}
+                      {fmt(lifetimeDeployed)}
                     </TableCell>
                     <TableCell />
                   </TableRow>
@@ -948,8 +891,8 @@ export default function InvestorDashboardPage() {
           <DialogHeader>
             <DialogTitle>Investment Returns</DialogTitle>
             <DialogDescription>
-              {fmt(totalReturns + pendingReturns)} total &middot;{" "}
-              {myTier.rate}% per cycle
+              {fmt(totalReturns + pendingReturns)} total &middot; at current{" "}
+              {myTier.rate}% tier
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[65vh] overflow-y-auto">
@@ -987,7 +930,7 @@ export default function InvestorDashboardPage() {
                   {fmt(totalReturns + pendingReturns)}
                 </p>
                 <p className="mt-1 text-xs text-gray-500">
-                  at {myTier.rate}% per cycle
+                  at current {myTier.rate}% tier
                 </p>
               </div>
             </div>
@@ -1006,6 +949,9 @@ export default function InvestorDashboardPage() {
                   <TableRow>
                     <TableHead className="text-[10px]">#</TableHead>
                     <TableHead className="text-[10px]">PO Ref</TableHead>
+                    <TableHead className="text-right text-[10px]">
+                      Rate
+                    </TableHead>
                     <TableHead className="text-right text-[10px]">
                       Return
                     </TableHead>
@@ -1028,6 +974,9 @@ export default function InvestorDashboardPage() {
                       >
                         {dep.poRef}
                       </TableCell>
+                      <TableCell className="text-right font-mono text-xs text-gray-600">
+                        {dep.returnRate}%
+                      </TableCell>
                       <TableCell className="text-right font-mono text-xs font-medium text-accent-600">
                         +{fmt(dep.returnAmt)}
                       </TableCell>
@@ -1045,65 +994,8 @@ export default function InvestorDashboardPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ═══ WITHDRAW DIALOG ═══ */}
-      <Dialog open={showWithdrawDialog} onOpenChange={setShowWithdrawDialog}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Withdraw Funds</DialogTitle>
-            <DialogDescription>
-              Request a withdrawal from your cash balance of{" "}
-              <span className="font-mono font-medium text-brand-600">
-                {fmt(cashBalance)}
-              </span>
-              . Your request will be sent to admin for approval.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">
-                Amount (RM)
-              </label>
-              <Input
-                type="number"
-                value={withdrawAmount}
-                onChange={(e) => setWithdrawAmount(e.target.value)}
-                placeholder={`Max ${fmt(cashBalance)}`}
-                max={cashBalance}
-                min={1}
-              />
-              {parseFloat(withdrawAmount) > cashBalance && (
-                <p className="mt-1 text-xs text-danger-600">
-                  Amount exceeds your cash balance
-                </p>
-              )}
-            </div>
-            <button
-              type="button"
-              className="text-xs font-medium text-brand-600 hover:text-brand-800"
-              onClick={() => setWithdrawAmount(String(cashBalance))}
-            >
-              Withdraw all ({fmt(cashBalance)})
-            </button>
-          </div>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>
-              Cancel
-            </DialogClose>
-            <Button
-              className="bg-brand-600 text-white hover:bg-brand-800"
-              onClick={handleWithdraw}
-              disabled={
-                withdrawing ||
-                !withdrawAmount ||
-                parseFloat(withdrawAmount) <= 0 ||
-                parseFloat(withdrawAmount) > cashBalance
-              }
-            >
-              {withdrawing ? "Submitting..." : "Submit Request"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Under Option C, withdrawals happen on the Wallet page only
+          (capital type, min RM 5,000, admin approval). */}
 
       {/* ═══ SHEET 5: CAPITAL HISTORY ═══ */}
       <Sheet open={ledgerOpen} onOpenChange={setLedgerOpen}>
@@ -1111,7 +1003,7 @@ export default function InvestorDashboardPage() {
           <SheetHeader>
             <SheetTitle>Capital History</SheetTitle>
             <SheetDescription>
-              Every deposit, withdrawal, return, compound, and adjustment on
+              Every deposit, withdrawal, return, and adjustment on
               your account, newest first.
             </SheetDescription>
           </SheetHeader>
@@ -1142,15 +1034,15 @@ export default function InvestorDashboardPage() {
                       deposit: "Deposit",
                       withdrawal: "Withdrawal",
                       return_credit: "Return",
-                      compound: "Compound",
                       admin_adjustment: "Adjustment",
+                      introducer_credit: "Introducer Commission",
                     };
                     const kindColor: Record<string, string> = {
                       deposit: "text-success-600",
                       withdrawal: "text-danger-600",
                       return_credit: "text-accent-600",
-                      compound: "text-gray-500",
                       admin_adjustment: "text-amber-600",
+                      introducer_credit: "text-purple-600",
                     };
                     const kind = row.kind ?? "";
                     const amountColor =
@@ -1340,7 +1232,13 @@ export default function InvestorDashboardPage() {
                       Their Returns
                     </TableHead>
                     <TableHead className="text-right text-[10px]">
-                      Your Commission
+                      Earned
+                    </TableHead>
+                    <TableHead className="text-right text-[10px]">
+                      Pending
+                    </TableHead>
+                    <TableHead className="text-right text-[10px]">
+                      Total
                     </TableHead>
                     <TableHead className="text-[10px]">Status</TableHead>
                   </TableRow>
@@ -1360,6 +1258,12 @@ export default function InvestorDashboardPage() {
                       <TableCell className="text-right font-mono text-xs font-medium text-purple-600">
                         {fmt(r.commEarned)}
                       </TableCell>
+                      <TableCell className="text-right font-mono text-xs text-amber-600">
+                        {r.commPending > 0 ? fmt(r.commPending) : "--"}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs font-medium text-purple-600">
+                        {fmt(r.commTotal)}
+                      </TableCell>
                       <TableCell>
                         <CycleStatusBadge status={r.commStatus} />
                       </TableCell>
@@ -1376,43 +1280,28 @@ export default function InvestorDashboardPage() {
                     <TableCell className="text-right font-mono text-xs font-medium text-purple-600">
                       {fmt(totalIntroCommEarned)}
                     </TableCell>
+                    <TableCell className="text-right font-mono text-xs font-medium text-amber-600">
+                      {totalIntroCommPending > 0
+                        ? fmt(totalIntroCommPending)
+                        : "--"}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs font-medium text-purple-600">
+                      {fmt(totalIntroComm)}
+                    </TableCell>
                     <TableCell />
                   </TableRow>
                 </TableBody>
               </Table>
               <p className="mt-3 text-[11px] text-gray-500">
-                Commission = {introTier.rate}% of your introduced
-                investors&apos; returns. Earned when their cycles complete.
+                Earned = credited to capital from cleared cycles. Pending =
+                forecast at current tier rate ({introTier.rate}%) for cycles
+                still in flight.
               </p>
             </div>
           </DialogContent>
         </Dialog>
       )}
 
-      {/* ═══ TOP UP CAPITAL DIALOG ═══ */}
-      <Dialog open={topUpOpen} onOpenChange={setTopUpOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add more money</DialogTitle>
-            <DialogDescription>
-              The more you put in, the more you earn each month.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 text-sm text-gray-600">
-            <p>
-              Message your admin the amount you&apos;d like to add. Once
-              they top up your account, your money automatically starts
-              earning from the next PO — you don&apos;t need to do anything
-              else.
-            </p>
-          </div>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>
-              Close
-            </DialogClose>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

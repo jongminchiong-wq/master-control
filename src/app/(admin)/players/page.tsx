@@ -255,7 +255,9 @@ function PlayersPageContent() {
       );
 
       for (const po of playerMonthPOs) {
-        const w = calcPOWaterfall(toWaterfallPO(po), wPlayers, wAllPOs);
+        // Players page doesn't fetch deployments — assume full funding for
+        // commission preview. Entity page is the authoritative reconciliation.
+        const w = calcPOWaterfall(toWaterfallPO(po), wPlayers, wAllPOs, po.po_amount);
         euComm += w.euAmt;
         if (po.channel === "gep") gepTotal += po.po_amount;
         else punchTotal += po.po_amount;
@@ -269,7 +271,7 @@ function PlayersPageContent() {
           (po) => po.end_user_id === r.id
         );
         for (const po of recruitPOs) {
-          const w = calcPOWaterfall(toWaterfallPO(po), wPlayers, wAllPOs);
+          const w = calcPOWaterfall(toWaterfallPO(po), wPlayers, wAllPOs, po.po_amount);
           introComm += w.introAmt;
         }
       }
@@ -364,10 +366,14 @@ function PlayersPageContent() {
   }
 
   function openEditDialog(player: DBPlayer) {
+    // eu_tier_mode / intro_tier_mode are CHECK-constrained to 'A' | 'B' in
+    // the DB, but Supabase's generated types widen them to `string`.
+    // Narrow at the app boundary, defaulting to 'A' for any stray value.
+    const narrowTier = (v: string | null): "A" | "B" => (v === "B" ? "B" : "A");
     setForm({
       name: player.name,
-      eu_tier_mode: player.eu_tier_mode ?? "A",
-      intro_tier_mode: player.intro_tier_mode ?? "A",
+      eu_tier_mode: narrowTier(player.eu_tier_mode),
+      intro_tier_mode: narrowTier(player.intro_tier_mode),
       introduced_by: player.introduced_by ?? "",
     });
     setEditingPlayer(player);
@@ -1003,7 +1009,8 @@ function PlayerRow({
                         const w = calcPOWaterfall(
                           toWaterfallPO(po),
                           wPlayers,
-                          wAllPOs
+                          wAllPOs,
+                          po.po_amount
                         );
                         const status = getPOStatus(po);
                         const commStatus = getCommissionStatus(po);
@@ -1098,7 +1105,7 @@ function IntroducerEarnings({
     const rPOs = monthPOs.filter((po) => po.end_user_id === r.id);
     const rTotal = rPOs.reduce((s, po) => s + po.po_amount, 0);
     const rIntro = rPOs.reduce((s, po) => {
-      const w = calcPOWaterfall(toWaterfallPO(po), wPlayers, wAllPOs);
+      const w = calcPOWaterfall(toWaterfallPO(po), wPlayers, wAllPOs, po.po_amount);
       return s + w.introAmt;
     }, 0);
     return { name: r.name, monthlyPO: rTotal, introComm: rIntro };

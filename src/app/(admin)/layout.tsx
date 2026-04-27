@@ -8,6 +8,7 @@ import {
   Building2,
   Calculator,
   Shield,
+  Inbox,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { Footer } from "@/components/footer";
@@ -16,6 +17,7 @@ const navItems = [
   { href: "/players", label: "Players", icon: Users },
   { href: "/po-cycle", label: "PO Cycle", icon: RefreshCcw },
   { href: "/investors", label: "Investors", icon: Wallet },
+  { href: "/approvals", label: "Approvals", icon: Inbox },
   { href: "/entity", label: "Entity", icon: Building2 },
   { href: "/simulation", label: "Simulation", icon: Calculator },
 ];

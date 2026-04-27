@@ -221,7 +221,7 @@ function PayoutTimeline({ po }: { po: DBPO }) {
   if (hasDOs && !allDelivered) currentStep = 1;
   else if (allDelivered && !allPaid) currentStep = 2;
   else if (allPaid && !isCleared) currentStep = 3;
-  else if (isCleared) currentStep = 4;
+  else if (isCleared) currentStep = 5;
 
   function state(step: number): TimelineStepState {
     if (step < currentStep) return "done";
@@ -450,7 +450,9 @@ export default function PlayerDashboardPage() {
   const myPOData = useMemo(() => {
     return myMonthPOs.map((po) => {
       const wPO = toWaterfallPO(po);
-      const w = calcPOWaterfall(wPO, wPlayers, wAllPOs);
+      // Player dashboard doesn't fetch deployments — assume full funding for
+      // commission preview. Entity page is the authoritative reconciliation.
+      const w = calcPOWaterfall(wPO, wPlayers, wAllPOs, po.po_amount);
       const poStatus = getPOStatus(po);
       const commStatus = getCommissionStatus(po);
       return { po, waterfall: w, poStatus, commStatus };
@@ -529,14 +531,14 @@ export default function PlayerDashboardPage() {
       );
       const recruitIntroComm = recruitPOs.reduce((s, po) => {
         const wPO = toWaterfallPO(po);
-        const w = calcPOWaterfall(wPO, wPlayers, wAllPOs);
+        const w = calcPOWaterfall(wPO, wPlayers, wAllPOs, po.po_amount);
         return s + w.introAmt;
       }, 0);
       const clearedIntroComm = recruitPOs
         .filter((po) => po.commissions_cleared)
         .reduce((s, po) => {
           const wPO = toWaterfallPO(po);
-          const w = calcPOWaterfall(wPO, wPlayers, wAllPOs);
+          const w = calcPOWaterfall(wPO, wPlayers, wAllPOs, po.po_amount);
           return s + w.introAmt;
         }, 0);
 
@@ -781,7 +783,7 @@ export default function PlayerDashboardPage() {
                             {po.ref}
                           </TableCell>
                           <TableCell>
-                            <ChannelBadge channel={po.channel} />
+                            <ChannelBadge channel={po.channel as "punchout" | "gep"} />
                           </TableCell>
                           <TableCell className="text-xs text-gray-500">
                             {po.po_date}

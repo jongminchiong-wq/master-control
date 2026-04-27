@@ -1,12 +1,13 @@
 "use client";
 
 import { Suspense } from "react";
-import { LayoutDashboard, Calculator, Shield } from "lucide-react";
+import { LayoutDashboard, Calculator, Shield, Wallet } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { Footer } from "@/components/footer";
 
 const navItems = [
   { href: "/portfolio", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/wallet", label: "Wallet", icon: Wallet },
   { href: "/returns", label: "Simulator", icon: Calculator },
 ];
 

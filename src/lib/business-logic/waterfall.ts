@@ -33,6 +33,7 @@ export interface Player extends PlayerForTier {
 export interface WaterfallResult {
   channel: string;
   poAmount: number;
+  totalDeployed: number;
   euTier: Tier;
   euAmt: number;
   gross: number;
@@ -56,7 +57,8 @@ export interface WaterfallResult {
 export const calcPOWaterfall = (
   po: PurchaseOrder,
   players: Player[],
-  allPos: PurchaseOrder[]
+  allPos: PurchaseOrder[],
+  totalDeployed: number
 ): WaterfallResult => {
   const eu = players.find((p) => p.id === po.endUserId);
   const intro =
@@ -64,6 +66,7 @@ export const calcPOWaterfall = (
       ? players.find((p) => p.id === eu.introducedBy) ?? null
       : null;
   const poAmount = po.poAmount || 0;
+  const deployed = Math.max(0, Math.min(totalDeployed || 0, poAmount));
   const channel = po.channel || "punchout";
   const poMonth = getMonth(po.poDate);
 
@@ -97,7 +100,7 @@ export const calcPOWaterfall = (
 
   const gross = poAmount - riskAdjustedCogs;
   const platformFee = channel === "punchout" ? poAmount * 0.03 : 0;
-  const investorFee = poAmount * (INV_RATE / 100);
+  const investorFee = deployed * (INV_RATE / 100);
   const pool = gross - platformFee - investorFee;
   const euAmt = Math.max(0, pool * (euTier.rate / 100));
   const entityGross = Math.max(0, pool - euAmt);
@@ -127,6 +130,7 @@ export const calcPOWaterfall = (
   return {
     channel,
     poAmount,
+    totalDeployed: deployed,
     euTier,
     euAmt,
     gross,
