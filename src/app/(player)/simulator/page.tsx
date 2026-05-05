@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Supabase
@@ -156,6 +155,23 @@ export default function PlayerSimulatorPage() {
 
   return (
     <div className="space-y-5">
+      <MetricCard
+        label="Total estimated monthly earnings"
+        value={fmt(totalMonthly)}
+        color="success"
+      >
+        {numRecruits > 0 && (
+          <div className="mt-1 flex gap-2.5">
+            <span className="text-[10px] font-medium text-brand-600">
+              Player {fmt(euAmt)}
+            </span>
+            <span className="text-[10px] font-medium text-purple-600">
+              Intro {fmt(totalIntroAmt)}
+            </span>
+          </div>
+        )}
+      </MetricCard>
+
       {/* ── Summary MetricCards ─────────────────────────────── */}
       <div
         className={cn(
@@ -184,22 +200,33 @@ export default function PlayerSimulatorPage() {
         )}
       </div>
 
-      <MetricCard
-        label="Total estimated monthly earnings"
-        value={fmt(totalMonthly)}
-        color="success"
-      >
-        {numRecruits > 0 && (
-          <div className="mt-1 flex gap-2.5">
-            <span className="text-[10px] font-medium text-brand-600">
-              Player {fmt(euAmt)}
-            </span>
-            <span className="text-[10px] font-medium text-purple-600">
-              Intro {fmt(totalIntroAmt)}
+      {/* ── COGS ────────────────────────────────────────────── */}
+      <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+        <p className="mb-4 text-xs font-medium uppercase tracking-wide text-brand-600">
+          COGS
+        </p>
+        <div className="space-y-3">
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs text-gray-500">COGS %</span>
+            <span className="font-mono text-sm font-medium text-gray-800">
+              {cogsPercent}%
             </span>
           </div>
-        )}
-      </MetricCard>
+          <Slider
+            value={[cogsPercent]}
+            onValueChange={(v) =>
+              setCogsPercent(Array.isArray(v) ? v[0] : v)
+            }
+            min={60}
+            max={95}
+            step={1}
+          />
+          <div className="flex justify-between text-[10px] text-gray-400">
+            <span>60%</span>
+            <span>95%</span>
+          </div>
+        </div>
+      </div>
 
       {/* ── My Business ─────────────────────────────────────── */}
       <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
@@ -292,28 +319,6 @@ export default function PlayerSimulatorPage() {
             )}
           </div>
 
-          {/* COGS slider */}
-          <div className="space-y-3">
-            <div className="flex items-baseline justify-between">
-              <span className="text-xs text-gray-500">COGS %</span>
-              <span className="font-mono text-sm font-medium text-gray-800">
-                {cogsPercent}%
-              </span>
-            </div>
-            <Slider
-              value={[cogsPercent]}
-              onValueChange={(v) =>
-                setCogsPercent(Array.isArray(v) ? v[0] : v)
-              }
-              min={60}
-              max={95}
-              step={1}
-            />
-            <div className="flex justify-between text-[10px] text-gray-400">
-              <span>60%</span>
-              <span>95%</span>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -412,25 +417,6 @@ export default function PlayerSimulatorPage() {
           )}
         </div>
       </div>
-
-      {/* ── Introducer Commission (standalone) ──────────────── */}
-      {numRecruits > 0 && (
-        <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-          <div className="flex items-center gap-2">
-            <Users className="size-4 text-purple-600" strokeWidth={1.5} />
-            <p className="text-xs font-medium uppercase tracking-wide text-purple-600">
-              Introducer Commission
-            </p>
-          </div>
-          <p className="mt-1.5 font-mono text-lg font-medium text-purple-600">
-            {fmt(totalIntroAmt)}
-          </p>
-          <p className="mt-1 text-xs text-gray-500">
-            {introTier.rate}% of entity&rsquo;s share &times; {numRecruits}{" "}
-            recruit{numRecruits > 1 ? "s" : ""}
-          </p>
-        </div>
-      )}
 
       {/* ── Footnote ─────────────────────────────────────────── */}
       <div className="rounded-xl bg-gray-50 p-4 text-[11px] leading-relaxed text-gray-500">
