@@ -15,10 +15,10 @@ import { PlayerMonthProvider } from "./_month-context";
 
 const navItems = [
   { href: "/dashboard", label: "Home", icon: Home },
-  { href: "/withdrawals", label: "Withdrawals", icon: ArrowDownToLine },
-  { href: "/simulator", label: "Simulator", icon: Calculator },
   { href: "/my-pos", label: "My PO", icon: Package },
   { href: "/introducer-commission", label: "Introducer Commission", icon: Users },
+  { href: "/withdrawals", label: "Withdrawals", icon: ArrowDownToLine },
+  { href: "/simulator", label: "Simulator", icon: Calculator },
 ];
 
 const footerNavItems = [
