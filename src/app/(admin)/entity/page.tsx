@@ -24,7 +24,7 @@ import {
 } from "@/lib/business-logic/deployment";
 import { buildCapitalEvents } from "@/lib/business-logic/capital-events";
 import { calcFundingStatus } from "@/lib/business-logic/funding-status";
-import { fmt, getMonth } from "@/lib/business-logic/formatters";
+import { fmt, fmtSigned, getMonth } from "@/lib/business-logic/formatters";
 import { useSelectedMonth } from "@/lib/hooks/use-selected-month";
 
 // Shared components
@@ -33,7 +33,6 @@ import { ChannelBadge } from "@/components/channel-badge";
 import { MonthPicker } from "@/components/month-picker";
 import { SectionHeader } from "@/components/section-header";
 import { HealthCheck } from "@/components/health-check";
-import { WaterfallTable } from "@/components/waterfall-table";
 import { UnfundedBanner } from "@/components/unfunded-banner";
 
 // UI components
@@ -67,8 +66,10 @@ type DBIntroducerCredit = Tables<"introducer_credits">;
 function toWaterfallPlayer(p: DBPlayer): Player {
   return {
     id: p.id,
-    euTierMode: p.eu_tier_mode ?? "A",
-    introTierMode: p.intro_tier_mode ?? "A",
+    euTierModeProxy: p.eu_tier_mode_proxy,
+    euTierModeGrid: p.eu_tier_mode_grid,
+    introTierModeProxy: p.intro_tier_mode_proxy,
+    introTierModeGrid: p.intro_tier_mode_grid,
     introducedBy: p.introduced_by,
   };
 }
@@ -83,8 +84,8 @@ function toWaterfallPO(po: DBPO): PurchaseOrder {
     dos: (po.delivery_orders ?? []).map((d) => ({
       amount: d.amount,
       delivery: d.delivery ?? "local",
-      urgency: d.urgency ?? "normal",
     })),
+    otherCost: po.other_cost,
   };
 }
 
@@ -127,6 +128,14 @@ interface POEntityData extends WaterfallResult {
   unfunded: number;
   spread: number;
   investorBreakdown: InvestorBreakdownRow[];
+  // Commission payables run against PO face value, not the month-horizon
+  // funded snapshot. A cleared PO is fully funded by definition, so what
+  // gets paid to the player should not depend on intra-month deployment
+  // timing. P&L / spread keep using the snapshot fields above.
+  payableEuAmt: number;
+  payableIntroAmt: number;
+  payablePlayerLossShare: number;
+  payableIntroducerLossShare: number;
 }
 
 interface InvestorBreakdownRow {
@@ -571,7 +580,13 @@ function EntityPageContent() {
         const poAmt = dbPO.po_amount || 0;
         const poDeps = deployments.filter((d) => d.poId === dbPO.id);
         const funded = poDeps.reduce((s, d) => s + d.deployed, 0);
+        // Snapshot waterfall: feeds P&L, entity gross, spread, investor cost.
+        // Uses the month-horizon `funded` so historical months remain stable.
         const w = calcPOWaterfall(wPO, wPlayers, wAllPOs, funded);
+        // Payable waterfall: feeds Commission Payables only. Uses PO face
+        // value so the player-side commission is funding-timing-agnostic and
+        // matches what every player-facing screen already displays.
+        const wPayable = calcPOWaterfall(wPO, wPlayers, wAllPOs, poAmt);
         const hasSomePaid =
           dbPO.delivery_orders?.some((d) => d.buyer_paid) ?? false;
         const fullyPaid =
@@ -611,6 +626,10 @@ function EntityPageContent() {
           unfunded,
           spread,
           investorBreakdown,
+          payableEuAmt: wPayable.euAmt,
+          payableIntroAmt: wPayable.introAmt,
+          payablePlayerLossShare: wPayable.playerLossShare,
+          payableIntroducerLossShare: wPayable.introducerLossShare,
         };
       });
   }, [monthPOs, wPlayers, wAllPOs, deployments]);
@@ -632,12 +651,26 @@ function EntityPageContent() {
   const totalPlatformFee = revenuePOs.reduce((s, p) => s + p.platformFee, 0);
   const totalInvestorCost = revenuePOs.reduce((s, p) => s + p.investorFee, 0);
   const totalPool = revenuePOs.reduce((s, p) => s + p.pool, 0);
-  const totalEUComm = revenuePOs.reduce((s, p) => s + p.euAmt, 0);
-  const totalIntroComm = revenuePOs.reduce((s, p) => s + p.introAmt, 0);
+  const totalEUComm = revenuePOs.reduce(
+    (s, p) => s + p.euAmt - p.playerLossShare,
+    0
+  );
+  const totalIntroComm = revenuePOs.reduce(
+    (s, p) => s + p.introAmt - p.introducerLossShare,
+    0
+  );
   const entityGrossIncome = revenuePOs.reduce((s, p) => s + p.entityShare, 0);
+  const totalEntityLossShare = revenuePOs.reduce(
+    (s, p) => s + p.entityLossShare,
+    0
+  );
   const totalSpread = poData.reduce((s, p) => s + p.spread, 0);
   const entityNetBeforeOpex =
-    entityGrossIncome + totalSpread + totalCogsReserve - totalInvIntroComm;
+    entityGrossIncome +
+    totalSpread +
+    totalCogsReserve -
+    totalInvIntroComm -
+    totalEntityLossShare;
   const entityNetProfit = entityNetBeforeOpex - monthlyOpex;
 
   // ── Commission payables (fully-paid POs only) ────────────
@@ -646,8 +679,14 @@ function EntityPageContent() {
     () => poData.filter((p) => p.fullyPaid),
     [poData]
   );
-  const payableEUComm = fullyPaidPOs.reduce((s, p) => s + p.euAmt, 0);
-  const payableIntroComm = fullyPaidPOs.reduce((s, p) => s + p.introAmt, 0);
+  const payableEUComm = fullyPaidPOs.reduce(
+    (s, p) => s + p.payableEuAmt - p.payablePlayerLossShare,
+    0
+  );
+  const payableIntroComm = fullyPaidPOs.reduce(
+    (s, p) => s + p.payableIntroAmt - p.payableIntroducerLossShare,
+    0
+  );
   const payableInvestorReturns = deployments
     .filter((d) => d.cycleComplete)
     .reduce((s, d) => s + d.returnAmt, 0);
@@ -663,17 +702,23 @@ function EntityPageContent() {
     return players
       .map((p) => {
         const pPOs = fullyPaidPOs.filter((po) => po.endUserId === p.id);
-        const euComm = pPOs.reduce((s, po) => s + po.euAmt, 0);
+        const euComm = pPOs.reduce(
+          (s, po) => s + po.payableEuAmt - po.payablePlayerLossShare,
+          0
+        );
         // Intro earnings — POs from this player's recruits
         const recruits = players.filter((x) => x.introduced_by === p.id);
         const recruitPOs = fullyPaidPOs.filter((po) =>
           recruits.some((r) => r.id === po.endUserId)
         );
-        const introComm = recruitPOs.reduce((s, po) => s + po.introAmt, 0);
+        const introComm = recruitPOs.reduce(
+          (s, po) => s + po.payableIntroAmt - po.payableIntroducerLossShare,
+          0
+        );
         const total = euComm + introComm;
         return { name: p.name, euComm, introComm, total };
       })
-      .filter((p) => p.total > 0);
+      .filter((p) => p.total !== 0);
   }, [players, fullyPaidPOs]);
 
   // ── Cash position (fully-paid POs only) ──────────────────
@@ -697,6 +742,41 @@ function EntityPageContent() {
     cashOutInvIntro +
     cashOutOpex;
   const netCash = cashIn - totalCashOut;
+
+  // ── Reconciled Monthly P&L (cash-grounded) ───────────────
+  // Every cash row maps 1:1 to a Cash Position line. By construction,
+  // cashNetProfit ≡ netCash. Player/intro commissions use the payable
+  // pass so they match the Player page for the same month.
+
+  const cashRevenue = cashIn;
+  const cashCOGS = cashOutCOGS;
+  const cashGrossProfit = cashRevenue - cashCOGS;
+  const cashPlatformFee = cashOutPlatform;
+  const cashPlayerComm = payableEUComm;
+  const cashIntroComm = payableIntroComm;
+  const cashInvestorReturns = payableInvestorReturns;
+  const cashInvIntroComm = payableInvIntroComm;
+  const cashOpex = monthlyOpex;
+  const cashNetProfit =
+    cashRevenue -
+    cashCOGS -
+    cashPlatformFee -
+    cashPlayerComm -
+    cashIntroComm -
+    cashInvestorReturns -
+    cashInvIntroComm -
+    cashOpex;
+
+  // Accrual adjustments — entity income earned but not yet in cash.
+  // Spread is recognised on completed deployment cycles only; reserve
+  // is recognised on fully-paid POs (when supplier cost is realised).
+  const accrualSpread = fullyPaidPOs.reduce((s, p) => s + p.spread, 0);
+  const accrualCogsReserve = fullyPaidPOs.reduce(
+    (s, p) => s + (p.riskAdjustedCogs - p.supplierTotal),
+    0
+  );
+  const accrualNetProfit =
+    cashNetProfit + accrualSpread + accrualCogsReserve;
 
   // ── Spread totals ────────────────────────────────────────
 
@@ -740,15 +820,15 @@ function EntityPageContent() {
       <div className="grid grid-cols-4 gap-3">
         <MetricCard
           label="Gross Revenue"
-          value={fmt(totalRevenue)}
-          subtitle={`${revenuePOs.length} POs with payments`}
+          value={fmt(cashRevenue)}
+          subtitle={`${fullyPaidPOs.length} fully-paid POs`}
           color="success"
         />
         <MetricCard
-          label="Entity Net Income"
-          value={fmt(entityGrossIncome)}
-          subtitle="After Player + Player Intro deductions"
-          color={entityGrossIncome > 0 ? "accent" : "danger"}
+          label="Cash Net Profit"
+          value={fmt(cashNetProfit)}
+          subtitle="Ties to Cash Position"
+          color={cashNetProfit >= 0 ? "success" : "danger"}
         />
         <MetricCard
           label="Total OPEX"
@@ -758,17 +838,14 @@ function EntityPageContent() {
         />
         <MetricCard
           label="Net Profit"
-          value={fmt(entityNetProfit)}
-          subtitle="Income + spread + reserve - inv intro - OPEX"
-          color={entityNetProfit >= 0 ? "success" : "danger"}
+          value={fmt(accrualNetProfit)}
+          subtitle="Including spread + reserve"
+          color={accrualNetProfit >= 0 ? "success" : "danger"}
         />
       </div>
 
       {/* Unfunded Banner — only renders when unfunded POs exist */}
       <UnfundedBanner status={fundingStatus} />
-
-      {/* Health Check */}
-      <HealthCheck entityNet={entityNetProfit} />
 
       {/* ═══ 1. MONTHLY P&L ═══ */}
       <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-200">
@@ -777,100 +854,193 @@ function EntityPageContent() {
           open={openSections.pnl}
           onToggle={() => toggleSection("pnl")}
           badge={{
-            label: fmt(entityNetProfit),
-            color: entityNetProfit >= 0 ? "success" : "danger",
+            label: fmt(accrualNetProfit),
+            color: accrualNetProfit >= 0 ? "success" : "danger",
           }}
         />
         {openSections.pnl && (
           <div className="pt-2">
-            <WaterfallTable
-              rows={[
-                {
-                  label: `Gross Revenue (POs with payments)`,
-                  val: totalRevenue,
-                  color: "success",
-                  bold: true,
-                },
-                {
-                  label: "- Risk-Adjusted COGS",
-                  val: -totalCOGS,
-                  color: "danger",
-                },
-                {
-                  label: "= Gross Profit",
-                  val: grossProfit,
-                  color: "success",
-                  bold: true,
-                },
-                {
-                  label: "- Proxy Platform Fee (3%)",
-                  val: -totalPlatformFee,
-                  color: "danger",
-                },
-                {
-                  label: "- Investor Cost (5% of PO)",
-                  val: -totalInvestorCost,
-                  color: "danger",
-                },
-                {
-                  label: "= Pool",
-                  val: totalPool,
-                  color: "accent",
-                  bold: true,
-                },
-                {
-                  label: "- Player Commissions",
-                  val: -totalEUComm,
-                  color: "brand",
-                },
-                {
-                  label: "- Player Introducer Commissions",
-                  val: -totalIntroComm,
-                  color: "purple",
-                },
-                {
-                  label: "= Entity Gross Income",
-                  val: entityGrossIncome,
-                  color: "accent",
-                  bold: true,
-                },
-                {
-                  label: "+ Investor Spread (5% - tier rate)",
-                  val: totalSpread,
-                  color: "success",
-                },
-                {
-                  label: "+ COGS Reserve (risk buffer margin)",
-                  val: totalCogsReserve,
-                  color: "success",
-                },
-                {
-                  label: "- Inv Introducer Commissions",
-                  val: -totalInvIntroComm,
-                  color: "amber",
-                },
-                {
-                  label: "= Entity Before OPEX",
-                  val: entityNetBeforeOpex,
-                  color: "accent",
-                  bold: true,
-                },
-                {
-                  label: "- Monthly OPEX",
-                  val: -monthlyOpex,
-                  color: "danger",
-                },
-                {
-                  label: "= Net Profit",
-                  val: entityNetProfit,
-                  color: entityNetProfit >= 0 ? "success" : "danger",
-                  bold: true,
-                },
-              ]}
-            />
-            <p className="mt-2 text-[10px] text-gray-500">
-              Revenue recognized from POs with at least 1 DO buyer-paid.{" "}
-              {monthPOs.length - revenuePOs.length} PO(s) not yet recognized.
+            <table className="w-full border-collapse text-xs">
+              <tbody>
+                {/* CASH P&L — ties to Cash Position */}
+                <tr>
+                  <td
+                    className="pb-1 text-[10px] font-medium uppercase tracking-wider text-gray-500"
+                    colSpan={2}
+                  >
+                    Cash P&L (ties to Cash Position)
+                  </td>
+                </tr>
+                <tr className="border-b-2 border-gray-200">
+                  <td className="py-2 font-medium text-success-600">
+                    Gross Revenue
+                  </td>
+                  <td className="py-2 text-right font-mono font-medium text-success-600">
+                    {fmt(cashRevenue)}
+                  </td>
+                </tr>
+                <tr className="border-b border-gray-100">
+                  <td className="py-2 text-gray-600">
+                    - COGS (actual supplier)
+                  </td>
+                  <td className="py-2 text-right font-mono text-danger-600">
+                    ({fmt(cashCOGS)})
+                  </td>
+                </tr>
+                <tr className="border-b-2 border-gray-200">
+                  <td className="py-2 font-medium text-gray-800">
+                    = Gross Profit
+                  </td>
+                  <td
+                    className={cn(
+                      "py-2 text-right font-mono font-medium",
+                      cashGrossProfit >= 0
+                        ? "text-success-600"
+                        : "text-danger-600"
+                    )}
+                  >
+                    {cashGrossProfit < 0
+                      ? `(${fmt(Math.abs(cashGrossProfit))})`
+                      : fmt(cashGrossProfit)}
+                  </td>
+                </tr>
+                {[
+                  { label: "- Proxy Platform Fee", val: cashPlatformFee },
+                  { label: "- Player Commissions", val: cashPlayerComm },
+                  {
+                    label: "- Player Introducer Commissions",
+                    val: cashIntroComm,
+                  },
+                  {
+                    label: "- Investor Returns (completed cycles)",
+                    val: cashInvestorReturns,
+                  },
+                  {
+                    label: "- Inv Introducer Commissions",
+                    val: cashInvIntroComm,
+                  },
+                  { label: "- Monthly OPEX", val: cashOpex },
+                ].map((row) => (
+                  <tr key={row.label} className="border-b border-gray-100">
+                    <td className="py-2 text-gray-600">{row.label}</td>
+                    <td className="py-2 text-right font-mono text-danger-600">
+                      ({fmt(row.val)})
+                    </td>
+                  </tr>
+                ))}
+                <tr className="border-t-2 border-gray-200">
+                  <td
+                    className={cn(
+                      "py-2 font-medium",
+                      cashNetProfit >= 0
+                        ? "text-success-600"
+                        : "text-danger-600"
+                    )}
+                  >
+                    = Cash Net Profit
+                  </td>
+                  <td
+                    className={cn(
+                      "py-2 text-right font-mono text-base font-medium",
+                      cashNetProfit >= 0
+                        ? "text-success-600"
+                        : "text-danger-600"
+                    )}
+                  >
+                    {cashNetProfit < 0
+                      ? `(${fmt(Math.abs(cashNetProfit))})`
+                      : fmt(cashNetProfit)}
+                  </td>
+                </tr>
+
+                {/* ACCRUAL ADJUSTMENTS — entity income not yet in cash */}
+                <tr>
+                  <td
+                    className="pt-5 pb-1 text-[10px] font-medium uppercase tracking-wider text-gray-500"
+                    colSpan={2}
+                  >
+                    Accrual Adjustments (entity income not yet in cash)
+                  </td>
+                </tr>
+                <tr className="border-b border-gray-100">
+                  <td className="py-2 text-gray-600">
+                    + Investor Spread Earned
+                  </td>
+                  <td
+                    className={cn(
+                      "py-2 text-right font-mono",
+                      accrualSpread >= 0
+                        ? "text-success-600"
+                        : "text-danger-600"
+                    )}
+                  >
+                    {accrualSpread < 0
+                      ? `(${fmt(Math.abs(accrualSpread))})`
+                      : fmt(accrualSpread)}
+                  </td>
+                </tr>
+                <tr className="border-b border-gray-100">
+                  <td className="py-2 text-gray-600">
+                    + COGS Reserve Released
+                  </td>
+                  <td
+                    className={cn(
+                      "py-2 text-right font-mono",
+                      accrualCogsReserve >= 0
+                        ? "text-success-600"
+                        : "text-danger-600"
+                    )}
+                  >
+                    {accrualCogsReserve < 0
+                      ? `(${fmt(Math.abs(accrualCogsReserve))})`
+                      : fmt(accrualCogsReserve)}
+                  </td>
+                </tr>
+                <tr className="border-t-2 border-gray-200">
+                  <td
+                    className={cn(
+                      "py-2 font-medium",
+                      accrualNetProfit >= 0
+                        ? "text-success-600"
+                        : "text-danger-600"
+                    )}
+                  >
+                    = Accrual Net Profit
+                  </td>
+                  <td
+                    className={cn(
+                      "py-2 text-right font-mono text-base font-medium",
+                      accrualNetProfit >= 0
+                        ? "text-success-600"
+                        : "text-danger-600"
+                    )}
+                  >
+                    {accrualNetProfit < 0
+                      ? `(${fmt(Math.abs(accrualNetProfit))})`
+                      : fmt(accrualNetProfit)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            {accrualNetProfit < 0 && (
+              <HealthCheck entityNet={accrualNetProfit} className="mt-3" />
+            )}
+            {accrualNetProfit >= 0 && accrualNetProfit < 5000 && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-xs text-amber-600">
+                Tight P&L this month at {fmt(accrualNetProfit)}. Watch the
+                margins.
+              </div>
+            )}
+            {accrualNetProfit >= 5000 && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg border border-success-100 bg-success-50 px-4 py-3 text-xs text-success-600">
+                Healthy P&L this month at {fmt(accrualNetProfit)}.
+              </div>
+            )}
+
+            <p className="mt-3 text-[10px] text-gray-500">
+              Cash P&L matches Cash Position. Accrual section reflects entity
+              income earned but not yet realised in cash.
             </p>
           </div>
         )}
@@ -1073,27 +1243,65 @@ function EntityPageContent() {
                   {playerPayables.map((p, i) => (
                     <TableRow key={i}>
                       <TableCell className="font-medium">{p.name}</TableCell>
-                      <TableCell className="font-mono text-brand-600">
-                        {p.euComm > 0 ? fmt(p.euComm) : "-"}
+                      <TableCell
+                        className={
+                          "font-mono " +
+                          (p.euComm < 0 ? "text-danger-600" : "text-brand-600")
+                        }
+                      >
+                        {p.euComm === 0 ? "-" : fmtSigned(p.euComm)}
                       </TableCell>
-                      <TableCell className="font-mono text-purple-600">
-                        {p.introComm > 0 ? fmt(p.introComm) : "-"}
+                      <TableCell
+                        className={
+                          "font-mono " +
+                          (p.introComm < 0
+                            ? "text-danger-600"
+                            : "text-purple-600")
+                        }
+                      >
+                        {p.introComm === 0 ? "-" : fmtSigned(p.introComm)}
                       </TableCell>
-                      <TableCell className="font-mono font-medium text-brand-600">
-                        {fmt(p.total)}
+                      <TableCell
+                        className={
+                          "font-mono font-medium " +
+                          (p.total < 0 ? "text-danger-600" : "text-brand-600")
+                        }
+                      >
+                        {fmtSigned(p.total)}
                       </TableCell>
                     </TableRow>
                   ))}
                   <TableRow className="border-t-2 border-gray-200">
                     <TableCell className="font-medium">Total</TableCell>
-                    <TableCell className="font-mono font-medium text-brand-600">
-                      {fmt(payableEUComm)}
+                    <TableCell
+                      className={
+                        "font-mono font-medium " +
+                        (payableEUComm < 0
+                          ? "text-danger-600"
+                          : "text-brand-600")
+                      }
+                    >
+                      {fmtSigned(payableEUComm)}
                     </TableCell>
-                    <TableCell className="font-mono font-medium text-purple-600">
-                      {fmt(payableIntroComm)}
+                    <TableCell
+                      className={
+                        "font-mono font-medium " +
+                        (payableIntroComm < 0
+                          ? "text-danger-600"
+                          : "text-purple-600")
+                      }
+                    >
+                      {fmtSigned(payableIntroComm)}
                     </TableCell>
-                    <TableCell className="font-mono font-medium text-brand-600">
-                      {fmt(payableEUComm + payableIntroComm)}
+                    <TableCell
+                      className={
+                        "font-mono font-medium " +
+                        (payableEUComm + payableIntroComm < 0
+                          ? "text-danger-600"
+                          : "text-brand-600")
+                      }
+                    >
+                      {fmtSigned(payableEUComm + payableIntroComm)}
                     </TableCell>
                   </TableRow>
                 </TableBody>

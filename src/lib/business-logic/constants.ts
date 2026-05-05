@@ -14,12 +14,6 @@ export interface DeliveryMode {
   label: string;
 }
 
-export interface UrgencyLevel {
-  id: "normal" | "urgent" | "rush";
-  label: string;
-  extra: number;
-}
-
 export interface RBPOTier {
   id: "small" | "mid1" | "mid2" | "large";
   label: string;
@@ -42,52 +36,78 @@ export const INV_TIERS: Tier[] = [
 
 export const PO_EU_A: Tier[] = [
   { name: "Base", rate: 24, min: 0, max: 75000 },
-  { name: "Active", rate: 27, min: 75000, max: 150000 },
-  { name: "Performer", rate: 30, min: 150000, max: 250000 },
-  { name: "Top", rate: 33, min: 250000, max: Infinity },
+  { name: "Active", rate: 27, min: 75001, max: 150000 },
+  { name: "Performer", rate: 30, min: 150001, max: 250000 },
+  { name: "Top", rate: 33, min: 250001, max: Infinity },
 ];
 
 export const PO_EU_B: Tier[] = [
   { name: "Base", rate: 33, min: 0, max: 75000 },
-  { name: "Active", rate: 36, min: 75000, max: 150000 },
-  { name: "Performer", rate: 39, min: 150000, max: 250000 },
-  { name: "Top", rate: 42, min: 250000, max: Infinity },
+  { name: "Active", rate: 36, min: 75001, max: 150000 },
+  { name: "Performer", rate: 39, min: 150001, max: 250000 },
+  { name: "Top", rate: 42, min: 250001, max: Infinity },
 ];
 
-// ── EU Tiers — GEP SMART channel (fixed, no A/B) ───────────
+// Premium variant of Punchout — sits between A (Default) and B (Exclusive).
+export const PO_EU_A_PLUS: Tier[] = [
+  { name: "Base", rate: 30, min: 0, max: 75000 },
+  { name: "Active", rate: 33, min: 75001, max: 150000 },
+  { name: "Performer", rate: 36, min: 150001, max: 250000 },
+  { name: "Top", rate: 39, min: 250001, max: Infinity },
+];
+
+// ── EU Tiers — GEP SMART channel (Default) ─────────────────
 
 export const PO_EU_C: Tier[] = [
   { name: "Base", rate: 21, min: 0, max: 75000 },
-  { name: "Active", rate: 24, min: 75000, max: 150000 },
-  { name: "Performer", rate: 27, min: 150000, max: 250000 },
-  { name: "Top", rate: 30, min: 250000, max: Infinity },
+  { name: "Active", rate: 24, min: 75001, max: 150000 },
+  { name: "Performer", rate: 27, min: 150001, max: 250000 },
+  { name: "Top", rate: 30, min: 250001, max: Infinity },
 ];
 
-// ── EU Introducer Tiers — Punchout channel (fixed) ──────────
+// ── EU Tiers — GEP SMART channel (Exclusive) ───────────────
+
+export const PO_EU_C_EXCLUSIVE: Tier[] = [
+  { name: "Base", rate: 24, min: 0, max: 75000 },
+  { name: "Active", rate: 27, min: 75001, max: 150000 },
+  { name: "Performer", rate: 30, min: 150001, max: 250000 },
+  { name: "Top", rate: 33, min: 250001, max: Infinity },
+];
+
+// ── EU Introducer Tiers — Punchout channel (Default) ────────
 
 export const PO_INTRO: Tier[] = [
   { name: "Base", rate: 9, min: 0, max: 100000 },
-  { name: "Active", rate: 12, min: 100000, max: 200000 },
-  { name: "Pro", rate: 15, min: 200000, max: 400000 },
-  { name: "Elite", rate: 18, min: 400000, max: Infinity },
+  { name: "Active", rate: 12, min: 100001, max: 200000 },
+  { name: "Pro", rate: 15, min: 200001, max: 400000 },
+  { name: "Elite", rate: 18, min: 400001, max: Infinity },
+];
+
+// ── EU Introducer Tiers — Punchout channel (Exclusive) ──────
+
+export const PO_INTRO_EXCLUSIVE: Tier[] = [
+  { name: "Base", rate: 12, min: 0, max: 100000 },
+  { name: "Active", rate: 15, min: 100001, max: 200000 },
+  { name: "Pro", rate: 18, min: 200001, max: 400000 },
+  { name: "Elite", rate: 21, min: 400001, max: Infinity },
 ];
 
 // ── EU Introducer Tiers — GEP channel A ─────────────────────
 
 export const PO_INTRO_B: Tier[] = [
   { name: "Base", rate: 12, min: 0, max: 100000 },
-  { name: "Active", rate: 15, min: 100000, max: 200000 },
-  { name: "Pro", rate: 18, min: 200000, max: 400000 },
-  { name: "Elite", rate: 21, min: 400000, max: Infinity },
+  { name: "Active", rate: 15, min: 100001, max: 200000 },
+  { name: "Pro", rate: 18, min: 200001, max: 400000 },
+  { name: "Elite", rate: 21, min: 400001, max: Infinity },
 ];
 
 // ── EU Introducer Tiers — GEP channel B ─────────────────────
 
 export const GEP_INTRO_B: Tier[] = [
   { name: "Base", rate: 21, min: 0, max: 100000 },
-  { name: "Active", rate: 24, min: 100000, max: 200000 },
-  { name: "Pro", rate: 27, min: 200000, max: 400000 },
-  { name: "Elite", rate: 30, min: 400000, max: Infinity },
+  { name: "Active", rate: 24, min: 100001, max: 200000 },
+  { name: "Pro", rate: 27, min: 200001, max: 400000 },
+  { name: "Elite", rate: 30, min: 400001, max: Infinity },
 ];
 
 // ── Investor Introducer Tiers (Combine tab only) ────────────
@@ -107,12 +127,6 @@ export const DELIVERY_MODES: DeliveryMode[] = [
   { id: "international", label: "International" },
 ];
 
-export const URGENCY: UrgencyLevel[] = [
-  { id: "normal", label: "Normal", extra: 0 },
-  { id: "urgent", label: "Urgent", extra: 2 },
-  { id: "rush", label: "Rush", extra: 4 },
-];
-
 export const RB_PO_TIERS: RBPOTier[] = [
   { id: "small", label: "Under RM10K", max: 10000 },
   { id: "mid1", label: "RM10K – 25K", max: 25000 },
@@ -121,8 +135,8 @@ export const RB_PO_TIERS: RBPOTier[] = [
 ];
 
 export const BUFFER_TABLE: Record<RBPOTier["id"], [number, number, number]> = {
-  small: [5.5, 8, 10],
-  mid1: [4, 6, 8],
-  mid2: [3, 5, 7],
-  large: [2.5, 4, 6],
+  small: [3.5, 5.5, 7.5],
+  mid1: [2.5, 4, 6],
+  mid2: [2, 3.5, 5],
+  large: [1.5, 2.5, 4],
 };

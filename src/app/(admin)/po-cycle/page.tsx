@@ -18,12 +18,14 @@ import type {
   PurchaseOrder as WaterfallPO,
 } from "@/lib/business-logic/waterfall";
 import { calcBufferPct } from "@/lib/business-logic/risk-buffer";
-import { INV_RATE, DELIVERY_MODES, URGENCY } from "@/lib/business-logic/constants";
-import { fmt, getMonth, fmtMonth } from "@/lib/business-logic/formatters";
+import { INV_RATE, DELIVERY_MODES } from "@/lib/business-logic/constants";
+import { fmt, fmtSigned, getMonth, fmtMonth } from "@/lib/business-logic/formatters";
 import { useSelectedMonth } from "@/lib/hooks/use-selected-month";
 import {
   creditPOReturns,
   creditIntroducerCommissions,
+  creditPlayerCommissions,
+  creditPlayerLossDebits,
 } from "@/lib/business-logic/credit";
 import { buildCapitalEvents } from "@/lib/business-logic/capital-events";
 import type {
@@ -79,8 +81,10 @@ type DBPO = Tables<"purchase_orders"> & {
 function toWaterfallPlayer(p: DBPlayer): WaterfallPlayer {
   return {
     id: p.id,
-    euTierMode: p.eu_tier_mode ?? "A",
-    introTierMode: p.intro_tier_mode ?? "A",
+    euTierModeProxy: p.eu_tier_mode_proxy,
+    euTierModeGrid: p.eu_tier_mode_grid,
+    introTierModeProxy: p.intro_tier_mode_proxy,
+    introTierModeGrid: p.intro_tier_mode_grid,
     introducedBy: p.introduced_by,
   };
 }
@@ -95,8 +99,8 @@ function toWaterfallPO(po: DBPO): WaterfallPO {
     dos: (po.delivery_orders ?? []).map((d) => ({
       amount: d.amount,
       delivery: d.delivery ?? "local",
-      urgency: d.urgency ?? "normal",
     })),
+    otherCost: po.other_cost,
   };
 }
 
@@ -247,6 +251,8 @@ function POCyclePageContent() {
     channel: "punchout" as "punchout" | "gep",
     po_date: "",
     po_amount: "",
+    description: "",
+    note: "",
   };
   const [poForm, setPOForm] = useState(emptyPOForm);
 
@@ -255,7 +261,6 @@ function POCyclePageContent() {
     description: "",
     amount: "",
     delivery: "local" as "local" | "sea" | "international",
-    urgency: "normal" as "normal" | "urgent" | "rush",
   };
   const [doForm, setDOForm] = useState(emptyDOForm);
 
@@ -415,6 +420,8 @@ function POCyclePageContent() {
       end_user_id: poForm.end_user_id,
       po_date: poForm.po_date,
       po_amount: parseFloat(poForm.po_amount) || 0,
+      description: poForm.description.trim() || null,
+      note: poForm.note.trim() || null,
     });
 
     setPOForm(emptyPOForm);
@@ -430,6 +437,28 @@ function POCyclePageContent() {
     fetchData();
   }
 
+  async function handleUpdatePOMeta(
+    poId: string,
+    field: "description" | "note" | "other_cost" | "other_cost_reason",
+    value: string | number,
+  ) {
+    let next: string | number | null;
+    if (field === "other_cost") {
+      next = typeof value === "number" ? value : parseFloat(value) || 0;
+    } else if (typeof value === "string") {
+      next = value.trim() === "" ? null : value;
+    } else {
+      next = value;
+    }
+    await supabase
+      .from("purchase_orders")
+      .update({ [field]: next })
+      .eq("id", poId);
+    setAllPOs((prev) =>
+      prev.map((po) => (po.id === poId ? { ...po, [field]: next } : po)),
+    );
+  }
+
   async function handleUpdateCommissionsCleared(poId: string, date: string) {
     await supabase
       .from("purchase_orders")
@@ -443,6 +472,28 @@ function POCyclePageContent() {
           : po
       )
     );
+
+    // Sync ledger timestamps to the new clear date. The credit RPCs are
+    // idempotent (ON CONFLICT DO NOTHING), so they won't update an
+    // existing player_commissions / player_loss_debits row when the
+    // admin edits the cleared date. Without this sync, the ledger keeps
+    // the original clear date forever — and the dashboard / withdrawals
+    // statement would attribute the row to whatever month that original
+    // date fell in. Skipped on un-clear (date === "") so the rows stay
+    // as a record of the historical clear.
+    if (date) {
+      const clearedAtIso = `${date}T00:00:00Z`;
+      await Promise.all([
+        supabase
+          .from("player_commissions")
+          .update({ created_at: clearedAtIso })
+          .eq("po_id", poId),
+        supabase
+          .from("player_loss_debits")
+          .update({ cleared_at: clearedAtIso })
+          .eq("po_id", poId),
+      ]);
+    }
 
     // Fire investor credits inline on clear. This replaces the old "admin
     // must visit the Investors page for the auto-fire effect to run" path,
@@ -544,6 +595,36 @@ function POCyclePageContent() {
       for (const err of introResult.errors) {
         console.error("Introducer credit RPC error on PO clear:", err);
       }
+
+      // Player-side ledger (migration 015). Independent of investor flow:
+      // a failure here doesn't roll back the investor credits above and
+      // vice versa. Idempotent on (player, po, type).
+      const wPlayers = players.map(toWaterfallPlayer);
+      const wPOs = patchedPOs.map(toWaterfallPO);
+      const playerResult = await creditPlayerCommissions({
+        supabase,
+        poId,
+        clearDate: date,
+        players: wPlayers,
+        pos: wPOs,
+      });
+      for (const err of playerResult.errors) {
+        console.error("Player commission RPC error on PO clear:", err);
+      }
+
+      // Loss debits when supplier cost > PO amount (Phase 2). Idempotent
+      // and independent of the profit-side credit above — a failure here
+      // does not roll back commissions or investor returns.
+      const lossResult = await creditPlayerLossDebits({
+        supabase,
+        poId,
+        clearDate: date,
+        players: wPlayers,
+        pos: wPOs,
+      });
+      for (const err of lossResult.errors) {
+        console.error("Player loss debit RPC error on PO clear:", err);
+      }
     } catch (err) {
       // Non-fatal: the PO is still marked cleared. Investors-page auto-fire
       // will catch up next time that page loads.
@@ -564,7 +645,6 @@ function POCyclePageContent() {
       description: doForm.description,
       amount: parseFloat(doForm.amount) || 0,
       delivery: doForm.delivery,
-      urgency: doForm.urgency,
     });
 
     setDOForm(emptyDOForm);
@@ -600,24 +680,16 @@ function POCyclePageContent() {
     );
   }
 
-  async function handleUpdateDORisk(
-    doId: string,
-    field: "delivery" | "urgency",
-    value: string
-  ) {
-    const updatePayload =
-      field === "delivery"
-        ? { delivery: value as "local" | "sea" | "international" }
-        : { urgency: value as "normal" | "urgent" | "rush" };
+  async function handleUpdateDODelivery(doId: string, value: string) {
     await supabase
       .from("delivery_orders")
-      .update(updatePayload)
+      .update({ delivery: value as "local" | "sea" | "international" })
       .eq("id", doId);
     setAllPOs((prev) =>
       prev.map((po) => ({
         ...po,
         delivery_orders: po.delivery_orders.map((d) =>
-          d.id === doId ? { ...d, [field]: value } : d
+          d.id === doId ? { ...d, delivery: value } : d
         ),
       }))
     );
@@ -844,12 +916,15 @@ function POCyclePageContent() {
                   onUpdateCommissionsCleared={(date) =>
                     handleUpdateCommissionsCleared(po.id, date)
                   }
+                  onUpdatePOMeta={(field, value) =>
+                    handleUpdatePOMeta(po.id, field, value)
+                  }
                   onAddDO={() => handleAddDO(po.id)}
                   onDeleteDO={handleDeleteDO}
                   onRequestDeleteDO={setConfirmDeleteDOId}
                   onCancelDeleteDO={() => setConfirmDeleteDOId(null)}
                   onUpdateDODate={handleUpdateDODate}
-                  onUpdateDORisk={handleUpdateDORisk}
+                  onUpdateDODelivery={handleUpdateDODelivery}
                   onDOFormChange={setDOForm}
                 />
               ))}
@@ -983,6 +1058,40 @@ function POCyclePageContent() {
                 />
               </div>
             </div>
+
+            {/* Description */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">
+                Description
+              </label>
+              <Input
+                type="text"
+                value={poForm.description}
+                onChange={(e) =>
+                  setPOForm((prev) => ({
+                    ...prev,
+                    description: e.target.value,
+                  }))
+                }
+                placeholder="Short label for this PO"
+              />
+            </div>
+
+            {/* Note */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">
+                Note
+              </label>
+              <textarea
+                rows={3}
+                value={poForm.note}
+                onChange={(e) =>
+                  setPOForm((prev) => ({ ...prev, note: e.target.value }))
+                }
+                placeholder="Internal notes (optional)"
+                className="w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-base placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none transition-colors md:text-sm"
+              />
+            </div>
           </div>
 
           <DialogFooter>
@@ -1025,12 +1134,13 @@ function PORow({
   onConfirmDeletePO,
   onCancelDeletePO,
   onUpdateCommissionsCleared,
+  onUpdatePOMeta,
   onAddDO,
   onDeleteDO,
   onRequestDeleteDO,
   onCancelDeleteDO,
   onUpdateDODate,
-  onUpdateDORisk,
+  onUpdateDODelivery,
   onDOFormChange,
 }: {
   po: DBPO;
@@ -1044,7 +1154,6 @@ function PORow({
     description: string;
     amount: string;
     delivery: "local" | "sea" | "international";
-    urgency: "normal" | "urgent" | "rush";
   };
   saving: boolean;
   onToggleExpand: () => void;
@@ -1052,6 +1161,10 @@ function PORow({
   onConfirmDeletePO: () => void;
   onCancelDeletePO: () => void;
   onUpdateCommissionsCleared: (date: string) => void;
+  onUpdatePOMeta: (
+    field: "description" | "note" | "other_cost" | "other_cost_reason",
+    value: string | number,
+  ) => void;
   onAddDO: () => void;
   onDeleteDO: (doId: string) => void;
   onRequestDeleteDO: (doId: string) => void;
@@ -1061,11 +1174,7 @@ function PORow({
     field: "supplier_paid" | "delivered" | "invoiced" | "buyer_paid",
     value: string
   ) => void;
-  onUpdateDORisk: (
-    doId: string,
-    field: "delivery" | "urgency",
-    value: string
-  ) => void;
+  onUpdateDODelivery: (doId: string, value: string) => void;
   onDOFormChange: (
     f:
       | typeof doForm
@@ -1083,11 +1192,7 @@ function PORow({
 
   // Risk-adjusted COGS
   const riskAdjustedCogs = dos.reduce((s, d) => {
-    const bp = calcBufferPct(
-      d.amount,
-      d.delivery ?? "local",
-      d.urgency ?? "normal"
-    );
+    const bp = calcBufferPct(d.amount, d.delivery ?? "local");
     return s + d.amount * (1 + bp / 100);
   }, 0);
 
@@ -1097,7 +1202,9 @@ function PORow({
   const waterfall = po.po_amount > 0
     ? calcPOWaterfall(toWaterfallPO(po), wPlayers, wAllPOs, po.po_amount)
     : null;
-  const euComm = waterfall?.euAmt ?? 0;
+  // Net the player's loss share so loss-making POs surface as a negative
+  // value rather than the clamped RM 0 from w.euAmt.
+  const euComm = waterfall ? waterfall.euAmt - waterfall.playerLossShare : 0;
 
   // Can clear commissions?
   const canClear = dos.length > 0 && dos.every((d) => d.buyer_paid);
@@ -1156,10 +1263,14 @@ function PORow({
         <TableCell
           className={cn(
             "font-mono text-sm font-medium",
-            chColor === "brand" ? "text-brand-600" : "text-accent-600"
+            euComm < 0
+              ? "text-danger-600"
+              : chColor === "brand"
+                ? "text-brand-600"
+                : "text-accent-600"
           )}
         >
-          {po.po_amount > 0 ? fmt(euComm) : "--"}
+          {po.po_amount > 0 ? fmtSigned(euComm) : "--"}
         </TableCell>
         <TableCell>
           <StatusBadge status={status} />
@@ -1210,8 +1321,8 @@ function PORow({
         >
           <TableCell colSpan={12} className="p-0">
             <div className="space-y-4 p-5">
-              {/* Commissions Cleared date */}
-              <div className="flex items-center gap-4">
+              {/* Commissions Cleared + Description + Note */}
+              <div className="flex flex-wrap items-start gap-4">
                 <div>
                   <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-gray-500">
                     Commissions Cleared
@@ -1230,6 +1341,47 @@ function PORow({
                       All DOs must be buyer-paid first
                     </p>
                   )}
+                </div>
+
+                <div className="min-w-[220px] flex-1">
+                  <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                    Description
+                  </label>
+                  <Input
+                    key={`desc-${po.id}-${po.description ?? ""}`}
+                    defaultValue={po.description ?? ""}
+                    onBlur={(e) => {
+                      if ((e.target.value ?? "") !== (po.description ?? "")) {
+                        onUpdatePOMeta("description", e.target.value);
+                      }
+                    }}
+                    placeholder="Short label for this PO"
+                    className="h-7 text-xs"
+                  />
+                  <p className="mt-0.5 text-[9px] text-gray-400">
+                    Visible to investors
+                  </p>
+                </div>
+
+                <div className="min-w-[260px] flex-[1.4]">
+                  <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                    Note
+                  </label>
+                  <textarea
+                    key={`note-${po.id}-${po.note ?? ""}`}
+                    rows={2}
+                    defaultValue={po.note ?? ""}
+                    onBlur={(e) => {
+                      if ((e.target.value ?? "") !== (po.note ?? "")) {
+                        onUpdatePOMeta("note", e.target.value);
+                      }
+                    }}
+                    placeholder="Internal notes (optional)"
+                    className="w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none transition-colors"
+                  />
+                  <p className="mt-0.5 text-[9px] text-gray-400">
+                    Visible to the player who owns this PO
+                  </p>
                 </div>
               </div>
 
@@ -1322,42 +1474,6 @@ function PORow({
                         ))}
                       </div>
                     </div>
-                    <div>
-                      <label
-                        className={cn(
-                          "mb-1 block text-[8px] font-medium uppercase tracking-wider",
-                          chColor === "brand"
-                            ? "text-brand-600"
-                            : "text-accent-600"
-                        )}
-                      >
-                        Urgency
-                      </label>
-                      <div className="flex gap-1">
-                        {URGENCY.map((u) => (
-                          <button
-                            key={u.id}
-                            type="button"
-                            onClick={() =>
-                              onDOFormChange((prev) => ({
-                                ...prev,
-                                urgency: u.id,
-                              }))
-                            }
-                            className={cn(
-                              "rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors",
-                              doForm.urgency === u.id
-                                ? chColor === "brand"
-                                  ? "bg-brand-600 text-white"
-                                  : "bg-accent-600 text-white"
-                                : "bg-white text-gray-500 ring-1 ring-gray-200 hover:bg-gray-50"
-                            )}
-                          >
-                            {u.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
                     <div className="ml-auto text-right">
                       <p className="text-[8px] font-medium uppercase tracking-wider text-gray-400">
                         Risk Buffer
@@ -1373,8 +1489,7 @@ function PORow({
                         +
                         {calcBufferPct(
                           parseFloat(doForm.amount) || 15000,
-                          doForm.delivery,
-                          doForm.urgency
+                          doForm.delivery
                         ).toFixed(1)}
                         %
                       </p>
@@ -1386,8 +1501,7 @@ function PORow({
                               (1 +
                                 calcBufferPct(
                                   parseFloat(doForm.amount) || 15000,
-                                  doForm.delivery,
-                                  doForm.urgency
+                                  doForm.delivery
                                 ) /
                                   100)
                           )}
@@ -1427,7 +1541,6 @@ function PORow({
                             "Items",
                             "Cost",
                             "Delivery",
-                            "Urgency",
                             "Buffer %",
                             "Risk-Adj",
                             "Supplier Paid",
@@ -1452,8 +1565,7 @@ function PORow({
                           const cfg = doStatusConfig[doSt];
                           const bp = calcBufferPct(
                             d.amount,
-                            d.delivery ?? "local",
-                            d.urgency ?? "normal"
+                            d.delivery ?? "local"
                           );
                           const riskAdj = d.amount * (1 + bp / 100);
 
@@ -1482,36 +1594,13 @@ function PORow({
                                 <select
                                   value={d.delivery ?? "local"}
                                   onChange={(e) =>
-                                    onUpdateDORisk(
-                                      d.id,
-                                      "delivery",
-                                      e.target.value
-                                    )
+                                    onUpdateDODelivery(d.id, e.target.value)
                                   }
                                   className="h-6 rounded border border-gray-200 bg-gray-50 px-1 text-[9px]"
                                 >
                                   {DELIVERY_MODES.map((dm) => (
                                     <option key={dm.id} value={dm.id}>
                                       {dm.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="px-1.5 py-2">
-                                <select
-                                  value={d.urgency ?? "normal"}
-                                  onChange={(e) =>
-                                    onUpdateDORisk(
-                                      d.id,
-                                      "urgency",
-                                      e.target.value
-                                    )
-                                  }
-                                  className="h-6 rounded border border-gray-200 bg-gray-50 px-1 text-[9px]"
-                                >
-                                  {URGENCY.map((u) => (
-                                    <option key={u.id} value={u.id}>
-                                      {u.label}
                                     </option>
                                   ))}
                                 </select>
@@ -1637,8 +1726,7 @@ function PORow({
                           const riskAdjTotal = dos.reduce((s, d) => {
                             const bp = calcBufferPct(
                               d.amount,
-                              d.delivery ?? "local",
-                              d.urgency ?? "normal"
+                              d.delivery ?? "local"
                             );
                             return s + d.amount * (1 + bp / 100);
                           }, 0);
@@ -1687,6 +1775,52 @@ function PORow({
                 )}
               </div>
 
+              {/* Other Cost (PO-level, no risk buffer) */}
+              <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-3">
+                <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                  Other Cost
+                </p>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div>
+                    <label className="mb-0.5 block text-[8px] font-medium uppercase tracking-wider text-gray-400">
+                      Amount (RM)
+                    </label>
+                    <Input
+                      key={`other-cost-${po.id}-${po.other_cost}`}
+                      type="number"
+                      defaultValue={po.other_cost || ""}
+                      onBlur={(e) => {
+                        const next = parseFloat(e.target.value) || 0;
+                        if (next !== (po.other_cost || 0)) {
+                          onUpdatePOMeta("other_cost", next);
+                        }
+                      }}
+                      placeholder="0"
+                      className="h-7 w-32 text-xs"
+                    />
+                  </div>
+                  <div className="min-w-[200px] flex-1">
+                    <label className="mb-0.5 block text-[8px] font-medium uppercase tracking-wider text-gray-400">
+                      Reason
+                    </label>
+                    <Input
+                      key={`other-reason-${po.id}-${po.other_cost_reason ?? ""}`}
+                      defaultValue={po.other_cost_reason ?? ""}
+                      onBlur={(e) => {
+                        if ((e.target.value ?? "") !== (po.other_cost_reason ?? "")) {
+                          onUpdatePOMeta("other_cost_reason", e.target.value);
+                        }
+                      }}
+                      placeholder="e.g. customs surcharge"
+                      className="h-7 text-xs"
+                    />
+                  </div>
+                </div>
+                <p className="mt-1 text-[9px] text-gray-400">
+                  Optional. Subtracted from gross profit. No risk buffer applied.
+                </p>
+              </div>
+
               {/* Commission Breakdown (waterfall) */}
               {waterfall && po.po_amount > 0 && (
                 <div>
@@ -1698,10 +1832,13 @@ function PORow({
                   <WaterfallTable
                     rows={buildWaterfallRows(waterfall, po, intro)}
                   />
-                  {waterfall.gross <= 0 && (
+                  {waterfall.rawLoss > 0 && (
                     <p className="mt-2 rounded-md border border-danger-100 bg-danger-50 p-2 text-[10px] text-danger-600">
-                      Negative margin — supplier costs + risk buffer exceed
-                      PO amount.
+                      Negative pool — combined supplier cost, risk buffer,
+                      and fees exceed PO value by {fmt(waterfall.rawLoss)}.
+                      Loss shared per profit-split ratios above. Player and
+                      introducer shares are netted from their next
+                      commissions when this PO is cleared.
                     </p>
                   )}
                   {dos.length > 0 &&
@@ -1744,13 +1881,24 @@ function buildWaterfallRows(
       val: -w.riskAdjustedCogs,
       color: "danger",
     },
-    {
-      label: "= Gross Profit",
-      val: w.gross,
-      color: w.gross >= 0 ? "success" : "danger",
-      bold: true,
-    },
   ];
+
+  if (w.otherCost > 0) {
+    rows.push({
+      label: po.other_cost_reason
+        ? `Other Cost (${po.other_cost_reason})`
+        : "Other Cost",
+      val: -w.otherCost,
+      color: "danger",
+    });
+  }
+
+  rows.push({
+    label: "= Gross Profit",
+    val: w.gross,
+    color: w.gross >= 0 ? "success" : "danger",
+    bold: true,
+  });
 
   if (w.channel === "punchout") {
     rows.push({
@@ -1800,6 +1948,33 @@ function buildWaterfallRows(
     color: w.entityShare >= 0 ? "accent" : "danger",
     bold: true,
   });
+
+  if (w.rawLoss > 0) {
+    rows.push({
+      label: "Loss Distribution (Pool Deficit)",
+      val: w.rawLoss,
+      color: "danger",
+      bold: true,
+    });
+    rows.push({
+      label: `Player Absorbs (${w.euTier.rate}% mirror)`,
+      val: w.playerLossShare,
+      color: "danger",
+    });
+    if (w.intro) {
+      const introName = intro?.name ? `${intro.name} · ` : "";
+      rows.push({
+        label: `Introducer Absorbs (${introName}${w.introRate}% mirror)`,
+        val: w.introducerLossShare,
+        color: "danger",
+      });
+    }
+    rows.push({
+      label: "Entity Absorbs",
+      val: w.entityLossShare,
+      color: "danger",
+    });
+  }
 
   return rows;
 }

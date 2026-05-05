@@ -17,6 +17,7 @@ export interface UnfundedPO {
   channel: string;
   poDate: string;
   poAmount: number;
+  description?: string | null;
   unfunded: number; // amount of this PO still waiting for pool capital
   ageDays: number; // days between poDate and asOfDate
 }
@@ -87,6 +88,7 @@ export function calcFundingStatus(input: CalcFundingStatusInput): FundingStatus 
       channel: po.channel,
       poDate,
       poAmount: poAmt,
+      description: po.description ?? null,
       unfunded,
       ageDays,
     });

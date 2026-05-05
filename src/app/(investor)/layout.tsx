@@ -1,12 +1,12 @@
 "use client";
 
 import { Suspense } from "react";
-import { LayoutDashboard, Calculator, Shield, Wallet } from "lucide-react";
+import { Home, Calculator, Shield, Wallet } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { Footer } from "@/components/footer";
 
 const navItems = [
-  { href: "/portfolio", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/portfolio", label: "Home", icon: Home },
   { href: "/wallet", label: "Wallet", icon: Wallet },
   { href: "/returns", label: "Simulator", icon: Calculator },
 ];
@@ -23,7 +23,7 @@ export default function InvestorLayout({
   return (
     <div className="flex h-screen">
       <Suspense><Sidebar navItems={navItems} footerNavItems={footerNavItems} /></Suspense>
-      <main className="flex flex-1 flex-col overflow-auto bg-gray-50 p-6">
+      <main className="flex flex-1 flex-col overflow-auto bg-gray-50 px-6 pb-6 pt-14">
         <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col">
           {children}
           <Footer />

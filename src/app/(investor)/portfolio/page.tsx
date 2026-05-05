@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -13,6 +13,7 @@ import { getTier } from "@/lib/business-logic/tiers";
 import {
   calcSharedDeployments,
   overlayReturnCredits,
+  type Deployment,
   type DeploymentPO,
   type DeploymentInvestor,
 } from "@/lib/business-logic/deployment";
@@ -59,6 +60,7 @@ import {
   ArrowRight,
   Clock,
   History,
+  ChevronRight,
 } from "lucide-react";
 
 // ── Types ───────────────────────────────────────────────────
@@ -88,6 +90,7 @@ function toDeploymentPO(po: DBPO): DeploymentPO {
     poDate: po.po_date,
     poAmount: po.po_amount,
     channel: po.channel,
+    description: po.description,
     dos: (po.delivery_orders ?? []).map((d) => ({
       buyerPaid: d.buyer_paid,
     })),
@@ -141,6 +144,60 @@ function CycleStatusBadge({ status }: { status: CycleStatus }) {
   );
 }
 
+// ── Introducer drill-down helpers ───────────────────────────
+// Kept as module-scope pure functions so they can be lifted into
+// `src/lib/business-logic/` later without touching the call sites.
+
+type ClearedRow = {
+  poRef: string;
+  clearedAt: string;
+  tierRate: number;
+  commission: number;
+};
+
+type PendingRow = {
+  poRef: string;
+  poDate: string;
+  currentTierRate: number;
+  projectedCommission: number;
+};
+
+function buildClearedRows(
+  credits: DBIntroducerCredit[],
+  poById: Map<string, DBPO>
+): ClearedRow[] {
+  return credits
+    .map((ic) => {
+      const po = poById.get(ic.po_id);
+      return {
+        poRef: po?.ref ?? "—",
+        clearedAt: ic.created_at,
+        tierRate: Number(ic.tier_rate),
+        commission: Number(ic.amount),
+      };
+    })
+    .sort((a, b) => (a.clearedAt < b.clearedAt ? 1 : -1));
+}
+
+function buildPendingRows(
+  recruitDeps: Deployment[],
+  currentTierRate: number
+): PendingRow[] {
+  return recruitDeps
+    .filter((d) => !d.cycleComplete)
+    .map((d) => ({
+      poRef: d.poRef,
+      poDate: d.poDate,
+      currentTierRate,
+      projectedCommission: d.returnAmt * (currentTierRate / 100),
+    }))
+    .sort((a, b) => (a.poDate < b.poDate ? -1 : 1));
+}
+
+function tierNameByRate(rate: number): string {
+  return INV_INTRO_TIERS.find((t) => t.rate === rate)?.name ?? "—";
+}
+
 // ── Component ───────────────────────────────────────────────
 
 export default function InvestorDashboardPage() {
@@ -178,6 +235,11 @@ export default function InvestorDashboardPage() {
   const [introOpen, setIntroOpen] = useState(false);
   const [withdrawalsOpen, setWithdrawalsOpen] = useState(false);
   const [ledgerOpen, setLedgerOpen] = useState(false);
+  const [expandedRecruit, setExpandedRecruit] = useState<string | null>(null);
+
+  const toggleRecruit = useCallback((id: string) => {
+    setExpandedRecruit((prev) => (prev === id ? null : id));
+  }, []);
   const router = useRouter();
   const goDeposit = useCallback(() => router.push("/wallet?deposit=1"), [router]);
 
@@ -463,15 +525,18 @@ export default function InvestorDashboardPage() {
   );
   const introTier = getTier(totalCapitalIntroduced, INV_INTRO_TIERS);
 
+  const poById = useMemo(() => {
+    const map = new Map<string, DBPO>();
+    for (const po of allPOs) map.set(po.id, po);
+    return map;
+  }, [allPOs]);
+
   const recruitData = useMemo(() => {
     if (myRecruits.length === 0 || !myInvestor) return [];
     return myRecruits.map((recruit) => {
       const recruitDeps = allDeployments.filter(
         (d) => d.investorId === recruit.id
       );
-      const rReturnsEarned = recruitDeps
-        .filter((d) => d.cycleComplete)
-        .reduce((s, d) => s + d.returnAmt, 0);
       const rReturnsPending = recruitDeps
         .filter((d) => !d.cycleComplete)
         .reduce((s, d) => s + d.returnAmt, 0);
@@ -479,13 +544,15 @@ export default function InvestorDashboardPage() {
       // row carries its locked tier_rate from the moment the underlying PO
       // cleared, so a tier upgrade later doesn't retroactively rewrite the
       // displayed value.
-      const commEarned = introducerCredits
-        .filter(
-          (ic) =>
-            ic.introducer_id === myInvestor.id &&
-            ic.introducee_id === recruit.id
-        )
-        .reduce((s, ic) => s + Number(ic.amount), 0);
+      const myCredits = introducerCredits.filter(
+        (ic) =>
+          ic.introducer_id === myInvestor.id &&
+          ic.introducee_id === recruit.id
+      );
+      const commEarned = myCredits.reduce(
+        (s, ic) => s + Number(ic.amount),
+        0
+      );
       // Pending stays a forward estimate at the *current* tier rate.
       const commPending = rReturnsPending * (introTier.rate / 100);
       // Status reflects commission state, not cycle state: once an amount
@@ -498,16 +565,25 @@ export default function InvestorDashboardPage() {
             ? "active"
             : "pending";
       return {
+        id: recruit.id,
         name: recruit.name,
         capital: recruit.capital,
-        returnsEarned: rReturnsEarned,
         commEarned,
         commPending,
         commTotal: commEarned + commPending,
         commStatus,
+        clearedRows: buildClearedRows(myCredits, poById),
+        pendingRows: buildPendingRows(recruitDeps, introTier.rate),
       };
     });
-  }, [myRecruits, allDeployments, introTier.rate, introducerCredits, myInvestor]);
+  }, [
+    myRecruits,
+    allDeployments,
+    introTier.rate,
+    introducerCredits,
+    myInvestor,
+    poById,
+  ]);
 
   const totalIntroCommEarned = recruitData.reduce(
     (s, r) => s + r.commEarned,
@@ -580,33 +656,36 @@ export default function InvestorDashboardPage() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-end gap-3">
-        <button
-          type="button"
-          onClick={() => setLedgerOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-200"
-        >
-          <History className="size-3.5" />
-          Capital history
-        </button>
-      </div>
-
-      {/* ═══ HERO SECTION ═══ */}
-      <div className="rounded-2xl bg-white p-8 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-sm text-gray-500">Portfolio Value</p>
-            <p className="mt-2 font-mono text-3xl font-semibold tracking-tight text-gray-900">
-              {fmt(myInvestor.capital)}
-            </p>
-            {totalReturns > 0 && (
-              <p className="mt-2 font-mono text-sm font-medium text-success-600">
+      {/* ═══ HERO SECTION (on canvas, no card chrome) ═══ */}
+      <div className="px-1 pt-2 pb-1">
+        <p className="text-sm text-gray-500">Portfolio Value</p>
+        <p className="mt-2 font-mono text-3xl font-semibold tracking-tight text-gray-900">
+          {fmt(myInvestor.capital)}
+        </p>
+        {(totalReturns > 0 || lifetimeDeployed > 0) && (
+          <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            {totalReturns > 0 ? (
+              <p className="font-mono text-sm font-medium text-success-600">
                 +{fmt(totalReturns)} total returns earned
+              </p>
+            ) : (
+              <span />
+            )}
+            {lifetimeDeployed > 0 && (
+              <p className="font-mono text-xs text-gray-500">
+                Lifetime deployed{" "}
+                <span className="font-medium text-gray-700">
+                  {fmt(lifetimeDeployed)}
+                </span>
+                <span className="text-gray-400">
+                  {" · "}
+                  {myDeployments.length} cycle
+                  {myDeployments.length !== 1 ? "s" : ""}
+                </span>
               </p>
             )}
           </div>
-        </div>
+        )}
 
         {/* Utilisation bar — all-time snapshot of live capital */}
         {myCapital > 0 && (
@@ -676,7 +755,7 @@ export default function InvestorDashboardPage() {
       <div
         className={cn(
           "grid gap-4",
-          myRecruits.length > 0 ? "grid-cols-4" : "grid-cols-3"
+          myRecruits.length > 0 ? "grid-cols-3" : "grid-cols-2"
         )}
       >
         {/* Card 1: Deployed (currently locked) */}
@@ -701,22 +780,7 @@ export default function InvestorDashboardPage() {
           </div>
         </button>
 
-        {/* Card 2: Lifetime Deployed — sum of every cycle ever, never drops */}
-        <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-          <div className="mb-4 flex size-10 items-center justify-center rounded-xl bg-brand-50">
-            <DollarSign className="size-5 text-brand-600" strokeWidth={1.5} />
-          </div>
-          <p className="text-xs font-medium text-gray-500">Lifetime Deployed</p>
-          <p className="mt-1 font-mono text-xl font-semibold text-brand-600">
-            {fmt(lifetimeDeployed)}
-          </p>
-          <p className="mt-1 text-xs text-gray-500">
-            {myDeployments.length} cycle
-            {myDeployments.length !== 1 ? "s" : ""} total
-          </p>
-        </div>
-
-        {/* Card 3: Lifetime Returns — from return_credits, never drops */}
+        {/* Card 2: Lifetime Returns — from return_credits, never drops */}
         <button
           type="button"
           onClick={() => setReturnsOpen(true)}
@@ -780,8 +844,8 @@ export default function InvestorDashboardPage() {
         )}
       </div>
 
-      {/* ═══ TIER PROGRESS ═══ */}
-      <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+      {/* ═══ TIER PROGRESS (on canvas, half-width) ═══ */}
+      <div className="w-full max-w-[50%] px-1">
         <div className="mb-4">
           <p className="text-sm font-semibold text-gray-800">Investor Tier</p>
         </div>
@@ -834,6 +898,7 @@ export default function InvestorDashboardPage() {
                   <TableRow>
                     <TableHead className="text-[10px]">PO Ref</TableHead>
                     <TableHead className="text-[10px]">PO Date</TableHead>
+                    <TableHead className="text-[10px]">Description</TableHead>
                     <TableHead className="text-right text-[10px]">
                       Deployed
                     </TableHead>
@@ -856,6 +921,9 @@ export default function InvestorDashboardPage() {
                       <TableCell className="text-xs text-gray-500">
                         {dep.poDate}
                       </TableCell>
+                      <TableCell className="text-xs text-gray-600">
+                        {dep.description || "—"}
+                      </TableCell>
                       <TableCell className="text-right font-mono text-xs font-medium text-brand-600">
                         {fmt(dep.deployed)}
                       </TableCell>
@@ -868,7 +936,7 @@ export default function InvestorDashboardPage() {
                   ))}
                   <TableRow className="border-t-2 border-gray-300">
                     <TableCell
-                      colSpan={2}
+                      colSpan={3}
                       className="text-xs font-medium text-gray-800"
                     >
                       Total
@@ -1215,7 +1283,7 @@ export default function InvestorDashboardPage() {
                 </span>
                 <span className="text-gray-500">
                   Capital:{" "}
-                  <span className="font-mono font-medium text-brand-600">
+                  <span className="font-mono font-medium text-gray-700">
                     {fmt(totalCapitalIntroduced)}
                   </span>
                 </span>
@@ -1224,12 +1292,10 @@ export default function InvestorDashboardPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-[28px] text-[10px]" />
                     <TableHead className="text-[10px]">Investor</TableHead>
                     <TableHead className="text-right text-[10px]">
                       Capital
-                    </TableHead>
-                    <TableHead className="text-right text-[10px]">
-                      Their Returns
                     </TableHead>
                     <TableHead className="text-right text-[10px]">
                       Earned
@@ -1244,40 +1310,205 @@ export default function InvestorDashboardPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {recruitData.map((r) => (
-                    <TableRow key={r.name}>
-                      <TableCell className="text-xs font-medium text-gray-800">
-                        {r.name}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs text-brand-600">
-                        {fmt(r.capital)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs">
-                        {fmt(r.returnsEarned)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs font-medium text-purple-600">
-                        {fmt(r.commEarned)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs text-amber-600">
-                        {r.commPending > 0 ? fmt(r.commPending) : "--"}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs font-medium text-purple-600">
-                        {fmt(r.commTotal)}
-                      </TableCell>
-                      <TableCell>
-                        <CycleStatusBadge status={r.commStatus} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {recruitData.map((r) => {
+                    const isExpanded = expandedRecruit === r.id;
+                    const hasDetail =
+                      r.clearedRows.length > 0 || r.pendingRows.length > 0;
+                    return (
+                      <Fragment key={r.id}>
+                        <TableRow
+                          onClick={
+                            hasDetail ? () => toggleRecruit(r.id) : undefined
+                          }
+                          className={cn(
+                            hasDetail && "cursor-pointer",
+                            isExpanded && "bg-purple-50/30"
+                          )}
+                        >
+                          <TableCell className="px-2">
+                            {hasDetail && (
+                              <ChevronRight
+                                className={cn(
+                                  "h-3.5 w-3.5 text-gray-400 transition-transform",
+                                  isExpanded && "rotate-90"
+                                )}
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs font-medium text-gray-800">
+                            {r.name}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs text-gray-700">
+                            {fmt(r.capital)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs font-medium text-success-600">
+                            {fmt(r.commEarned)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs text-amber-600">
+                            {r.commPending > 0 ? fmt(r.commPending) : "--"}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs font-medium text-accent-600">
+                            {fmt(r.commTotal)}
+                          </TableCell>
+                          <TableCell>
+                            <CycleStatusBadge status={r.commStatus} />
+                          </TableCell>
+                        </TableRow>
+                        {isExpanded && hasDetail && (
+                          <TableRow className="hover:bg-transparent">
+                            <TableCell
+                              colSpan={7}
+                              className="bg-gray-50/60 p-0"
+                            >
+                              <div className="space-y-5 px-4 py-4">
+                                {r.clearedRows.length > 0 && (
+                                  <div>
+                                    <div className="mb-2 flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[10px] font-semibold uppercase tracking-wider text-success-700">
+                                          Cleared cycles
+                                        </span>
+                                        <span className="font-mono text-[10px] text-gray-400">
+                                          {r.clearedRows.length}
+                                        </span>
+                                      </div>
+                                      <span className="text-[10px] text-gray-500">
+                                        Tier rate locked at clear date
+                                      </span>
+                                    </div>
+                                    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                                      <div className="grid grid-cols-5 gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                                        <div>PO Ref</div>
+                                        <div>Cleared</div>
+                                        <div className="text-right">
+                                          Tier @ Clear
+                                        </div>
+                                        <div className="text-right">Rate</div>
+                                        <div className="text-right">
+                                          Commission
+                                        </div>
+                                      </div>
+                                      {r.clearedRows.map((cr, i) => (
+                                        <div
+                                          key={i}
+                                          className="grid grid-cols-5 items-center gap-2 border-b border-gray-100 px-3 py-2 text-xs last:border-b-0"
+                                        >
+                                          <div className="font-mono text-accent-700">
+                                            {cr.poRef}
+                                          </div>
+                                          <div className="font-mono text-gray-600">
+                                            {cr.clearedAt.slice(0, 10)}
+                                          </div>
+                                          <div className="text-right">
+                                            <span className="inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-700">
+                                              {tierNameByRate(cr.tierRate)}
+                                            </span>
+                                          </div>
+                                          <div className="text-right font-mono text-purple-600">
+                                            {cr.tierRate}%
+                                          </div>
+                                          <div className="text-right font-mono font-medium text-success-600">
+                                            +{fmt(cr.commission)}
+                                          </div>
+                                        </div>
+                                      ))}
+                                      <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50/70 px-3 py-2">
+                                        <span className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                                          Subtotal earned
+                                        </span>
+                                        <span className="font-mono text-xs font-semibold text-success-700">
+                                          {fmt(r.commEarned)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {r.pendingRows.length > 0 && (
+                                  <div>
+                                    <div className="mb-2 flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-700">
+                                          Active
+                                        </span>
+                                        <span className="font-mono text-[10px] text-gray-400">
+                                          {r.pendingRows.length}
+                                        </span>
+                                      </div>
+                                      <span className="text-[10px] text-gray-500">
+                                        Forecast at current tier rate &middot;{" "}
+                                        {introTier.rate}%
+                                      </span>
+                                    </div>
+                                    <div className="overflow-hidden rounded-lg border border-amber-100 bg-white">
+                                      <div className="grid grid-cols-5 gap-2 border-b border-amber-100 bg-amber-50/50 px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                                        <div>PO Ref</div>
+                                        <div>PO Date</div>
+                                        <div className="text-right">
+                                          Current Tier
+                                        </div>
+                                        <div className="text-right">Rate</div>
+                                        <div className="text-right">
+                                          Projected
+                                        </div>
+                                      </div>
+                                      {r.pendingRows.map((pr, i) => (
+                                        <div
+                                          key={i}
+                                          className="grid grid-cols-5 items-center gap-2 border-b border-amber-50 px-3 py-2 text-xs last:border-b-0"
+                                        >
+                                          <div className="font-mono text-accent-700">
+                                            {pr.poRef}
+                                          </div>
+                                          <div className="font-mono text-gray-600">
+                                            {pr.poDate}
+                                          </div>
+                                          <div className="text-right">
+                                            <span className="inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-700">
+                                              {introTier.name}
+                                            </span>
+                                          </div>
+                                          <div className="text-right font-mono text-purple-600">
+                                            {pr.currentTierRate}%
+                                          </div>
+                                          <div className="text-right font-mono font-medium text-amber-700">
+                                            ~{fmt(pr.projectedCommission)}
+                                          </div>
+                                        </div>
+                                      ))}
+                                      <div className="flex items-center justify-between border-t border-amber-100 bg-amber-50/40 px-3 py-2">
+                                        <span className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                                          Subtotal projected
+                                        </span>
+                                        <span className="font-mono text-xs font-semibold text-amber-700">
+                                          ~{fmt(r.commPending)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <p className="mt-2 text-[10px] italic text-gray-500">
+                                      Projected amounts use the current tier
+                                      rate. The actual rate is locked when
+                                      each PO clears, so a tier change before
+                                      clear will adjust the final commission.
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                   <TableRow className="border-t-2 border-gray-300">
+                    <TableCell />
                     <TableCell className="text-xs font-medium text-gray-800">
                       Total
                     </TableCell>
-                    <TableCell className="text-right font-mono text-xs font-medium text-brand-600">
+                    <TableCell className="text-right font-mono text-xs font-medium text-gray-700">
                       {fmt(totalCapitalIntroduced)}
                     </TableCell>
-                    <TableCell />
-                    <TableCell className="text-right font-mono text-xs font-medium text-purple-600">
+                    <TableCell className="text-right font-mono text-xs font-medium text-success-600">
                       {fmt(totalIntroCommEarned)}
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs font-medium text-amber-600">
@@ -1285,7 +1516,7 @@ export default function InvestorDashboardPage() {
                         ? fmt(totalIntroCommPending)
                         : "--"}
                     </TableCell>
-                    <TableCell className="text-right font-mono text-xs font-medium text-purple-600">
+                    <TableCell className="text-right font-mono text-xs font-medium text-accent-600">
                       {fmt(totalIntroComm)}
                     </TableCell>
                     <TableCell />
@@ -1293,9 +1524,10 @@ export default function InvestorDashboardPage() {
                 </TableBody>
               </Table>
               <p className="mt-3 text-[11px] text-gray-500">
-                Earned = credited to capital from cleared cycles. Pending =
-                forecast at current tier rate ({introTier.rate}%) for cycles
-                still in flight.
+                Earned = credited to capital from cleared cycles, locked at
+                the tier rate that was in effect when the PO cleared. Pending
+                = forecast at the current tier rate ({introTier.rate}%) for
+                cycles still in flight.
               </p>
             </div>
           </DialogContent>

@@ -1,6 +1,13 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { Plus, Pencil, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { Tables } from "@/lib/supabase/types";
@@ -13,7 +20,12 @@ import type {
   PurchaseOrder as WaterfallPO,
 } from "@/lib/business-logic/waterfall";
 import { getTier, getEUTiers } from "@/lib/business-logic/tiers";
-import { fmt, getMonth, fmtMonth } from "@/lib/business-logic/formatters";
+import {
+  fmt,
+  fmtSigned,
+  getMonth,
+  fmtMonth,
+} from "@/lib/business-logic/formatters";
 import { useSelectedMonth } from "@/lib/hooks/use-selected-month";
 
 // Shared components
@@ -22,6 +34,8 @@ import { TierCard } from "@/components/tier-card";
 import { ChannelBadge } from "@/components/channel-badge";
 import { StatusBadge, type POStatus } from "@/components/status-badge";
 import { MonthPicker } from "@/components/month-picker";
+import { CommissionStatusBadge } from "@/components/commission-status-badge";
+import { getCommissionStatus } from "@/lib/business-logic/commission-status";
 
 // UI components
 import { Button } from "@/components/ui/button";
@@ -58,13 +72,56 @@ type DBPO = Tables<"purchase_orders"> & {
   delivery_orders: Tables<"delivery_orders">[];
 };
 
+type EUProxyMode = "A" | "A_PLUS" | "B";
+type EUGridMode = "A" | "B";
+type IntroMode = "A" | "B";
+
+const EU_PROXY_MODES: readonly EUProxyMode[] = ["A", "A_PLUS", "B"] as const;
+const EU_GRID_MODES: readonly EUGridMode[] = ["A", "B"] as const;
+const INTRO_MODES: readonly IntroMode[] = ["A", "B"] as const;
+
+const EU_PROXY_LABELS: Record<EUProxyMode, string> = {
+  A: "Default (24-33%)",
+  A_PLUS: "Premium (30-39%)",
+  B: "Exclusive (33-42%)",
+};
+
+const EU_GRID_LABELS: Record<EUGridMode, string> = {
+  A: "Default (21-30%)",
+  B: "Exclusive (24-33%)",
+};
+
+const INTRO_PROXY_LABELS: Record<IntroMode, string> = {
+  A: "Default (9-18%)",
+  B: "Exclusive (12-21%)",
+};
+
+const INTRO_GRID_LABELS: Record<IntroMode, string> = {
+  A: "Default (12-21%)",
+  B: "Exclusive (21-30%)",
+};
+
+function narrowEUProxy(v: string): EUProxyMode {
+  return v === "B" || v === "A_PLUS" ? v : "A";
+}
+
+function narrowEUGrid(v: string): EUGridMode {
+  return v === "B" ? "B" : "A";
+}
+
+function narrowIntro(v: string): IntroMode {
+  return v === "B" ? "B" : "A";
+}
+
 // ── DB → Business-logic mappers ─────────────────────────────
 
 function toWaterfallPlayer(p: DBPlayer): WaterfallPlayer {
   return {
     id: p.id,
-    euTierMode: p.eu_tier_mode ?? "A",
-    introTierMode: p.intro_tier_mode ?? "A",
+    euTierModeProxy: p.eu_tier_mode_proxy,
+    euTierModeGrid: p.eu_tier_mode_grid,
+    introTierModeProxy: p.intro_tier_mode_proxy,
+    introTierModeGrid: p.intro_tier_mode_grid,
     introducedBy: p.introduced_by,
   };
 }
@@ -79,8 +136,8 @@ function toWaterfallPO(po: DBPO): WaterfallPO {
     dos: (po.delivery_orders ?? []).map((d) => ({
       amount: d.amount,
       delivery: d.delivery ?? "local",
-      urgency: d.urgency ?? "normal",
     })),
+    otherCost: po.other_cost,
   };
 }
 
@@ -112,41 +169,6 @@ function getPOStatus(po: DBPO): POStatus {
   return "active";
 }
 
-// ── Commission status helper ────────────────────────────────
-
-type CommStatus = "cleared" | "payable" | "pending";
-
-function getCommissionStatus(po: DBPO): CommStatus {
-  if (po.commissions_cleared) return "cleared";
-  const dos = po.delivery_orders ?? [];
-  const fullyPaid = dos.length > 0 && dos.every((d) => d.buyer_paid);
-  if (fullyPaid) return "payable";
-  return "pending";
-}
-
-const commStatusConfig: Record<
-  CommStatus,
-  { label: string; bg: string; text: string }
-> = {
-  cleared: { label: "Cleared", bg: "bg-success-50", text: "text-success-800" },
-  payable: { label: "Payable", bg: "bg-amber-50", text: "text-amber-600" },
-  pending: { label: "Pending", bg: "bg-gray-100", text: "text-gray-500" },
-};
-
-function CommissionStatusBadge({ status }: { status: CommStatus }) {
-  const config = commStatusConfig[status];
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-medium",
-        config.bg,
-        config.text
-      )}
-    >
-      {config.label}
-    </span>
-  );
-}
 
 // ── Component ───────────────────────────────────────────────
 
@@ -173,11 +195,13 @@ function PlayersPageContent() {
   // Month selector (URL-driven, shared across admin pages)
   const [selectedMonth, setSelectedMonth] = useSelectedMonth();
 
-  // Form state
+  // Form state — DB defaults: eu_proxy 'A', eu_grid 'B', intro_proxy 'B', intro_grid 'A'
   const emptyForm = {
     name: "",
-    eu_tier_mode: "A" as "A" | "B",
-    intro_tier_mode: "A" as "A" | "B",
+    eu_tier_mode_proxy: "A" as EUProxyMode,
+    eu_tier_mode_grid: "B" as EUGridMode,
+    intro_tier_mode_proxy: "B" as IntroMode,
+    intro_tier_mode_grid: "A" as IntroMode,
     introduced_by: "",
   };
   const [form, setForm] = useState(emptyForm);
@@ -258,12 +282,15 @@ function PlayersPageContent() {
         // Players page doesn't fetch deployments — assume full funding for
         // commission preview. Entity page is the authoritative reconciliation.
         const w = calcPOWaterfall(toWaterfallPO(po), wPlayers, wAllPOs, po.po_amount);
-        euComm += w.euAmt;
+        // Net the player's loss share so loss-making POs surface as negative,
+        // mirroring the introducer aggregation below.
+        euComm += w.euAmt - w.playerLossShare;
         if (po.channel === "gep") gepTotal += po.po_amount;
         else punchTotal += po.po_amount;
       }
 
-      // Introducer earnings: commissions from recruits' POs
+      // Introducer earnings: commissions from recruits' POs, net of any
+      // loss share the introducer absorbs when supplier cost exceeds PO.
       const recruits = players.filter((r) => r.introduced_by === p.id);
       let introComm = 0;
       for (const r of recruits) {
@@ -272,7 +299,7 @@ function PlayersPageContent() {
         );
         for (const po of recruitPOs) {
           const w = calcPOWaterfall(toWaterfallPO(po), wPlayers, wAllPOs, po.po_amount);
-          introComm += w.introAmt;
+          introComm += w.introAmt - w.introducerLossShare;
         }
       }
 
@@ -309,8 +336,10 @@ function PlayersPageContent() {
     setSaving(true);
     await supabase.from("players").insert({
       name: form.name.trim(),
-      eu_tier_mode: form.eu_tier_mode,
-      intro_tier_mode: form.intro_tier_mode,
+      eu_tier_mode_proxy: form.eu_tier_mode_proxy,
+      eu_tier_mode_grid: form.eu_tier_mode_grid,
+      intro_tier_mode_proxy: form.intro_tier_mode_proxy,
+      intro_tier_mode_grid: form.intro_tier_mode_grid,
       introduced_by: form.introduced_by || null,
     });
     setForm(emptyForm);
@@ -326,8 +355,10 @@ function PlayersPageContent() {
       .from("players")
       .update({
         name: form.name.trim(),
-        eu_tier_mode: form.eu_tier_mode,
-        intro_tier_mode: form.intro_tier_mode,
+        eu_tier_mode_proxy: form.eu_tier_mode_proxy,
+        eu_tier_mode_grid: form.eu_tier_mode_grid,
+        intro_tier_mode_proxy: form.intro_tier_mode_proxy,
+        intro_tier_mode_grid: form.intro_tier_mode_grid,
         introduced_by: form.introduced_by || null,
       })
       .eq("id", editingPlayer.id);
@@ -350,15 +381,27 @@ function PlayersPageContent() {
     setConfirmDeleteId(player.id);
   }
 
+  type TierField =
+    | "eu_tier_mode_proxy"
+    | "eu_tier_mode_grid"
+    | "intro_tier_mode_proxy"
+    | "intro_tier_mode_grid";
+
   async function handleQuickTierUpdate(
     id: string,
-    field: "eu_tier_mode" | "intro_tier_mode",
-    value: "A" | "B"
+    field: TierField,
+    value: string
   ) {
+    // Build an explicitly-typed update payload to satisfy Supabase's
+    // RejectExcessProperties guard, which forbids dynamic-keyed objects.
     const update =
-      field === "eu_tier_mode"
-        ? { eu_tier_mode: value }
-        : { intro_tier_mode: value };
+      field === "eu_tier_mode_proxy"
+        ? { eu_tier_mode_proxy: value }
+        : field === "eu_tier_mode_grid"
+          ? { eu_tier_mode_grid: value }
+          : field === "intro_tier_mode_proxy"
+            ? { intro_tier_mode_proxy: value }
+            : { intro_tier_mode_grid: value };
     await supabase.from("players").update(update).eq("id", id);
     setPlayers((prev) =>
       prev.map((p) => (p.id === id ? { ...p, [field]: value } : p))
@@ -366,14 +409,12 @@ function PlayersPageContent() {
   }
 
   function openEditDialog(player: DBPlayer) {
-    // eu_tier_mode / intro_tier_mode are CHECK-constrained to 'A' | 'B' in
-    // the DB, but Supabase's generated types widen them to `string`.
-    // Narrow at the app boundary, defaulting to 'A' for any stray value.
-    const narrowTier = (v: string | null): "A" | "B" => (v === "B" ? "B" : "A");
     setForm({
       name: player.name,
-      eu_tier_mode: narrowTier(player.eu_tier_mode),
-      intro_tier_mode: narrowTier(player.intro_tier_mode),
+      eu_tier_mode_proxy: narrowEUProxy(player.eu_tier_mode_proxy),
+      eu_tier_mode_grid: narrowEUGrid(player.eu_tier_mode_grid),
+      intro_tier_mode_proxy: narrowIntro(player.intro_tier_mode_proxy),
+      intro_tier_mode_grid: narrowIntro(player.intro_tier_mode_grid),
       introduced_by: player.introduced_by ?? "",
     });
     setEditingPlayer(player);
@@ -426,9 +467,9 @@ function PlayersPageContent() {
         />
         <MetricCard
           label="Total Commissions"
-          value={fmt(totalCommissions)}
+          value={fmtSigned(totalCommissions)}
           subtitle="Player + Introducer"
-          color="brand"
+          color={totalCommissions < 0 ? "danger" : "brand"}
         />
       </div>
 
@@ -491,19 +532,17 @@ function PlayersPageContent() {
                   (x) => x.id === player.introduced_by
                 );
 
-                // Determine tier based on dominant channel
-                const mainChannel =
-                  (stats?.punchTotal ?? 0) >= (stats?.gepTotal ?? 0)
-                    ? "punchout"
-                    : "gep";
-                const euTiers = getEUTiers(
-                  {
-                    euTierMode: player.eu_tier_mode ?? "A",
-                    introTierMode: player.intro_tier_mode ?? "A",
-                  },
-                  mainChannel
-                );
-                const tier = getTier(stats?.totalPO ?? 0, euTiers);
+                // Per-channel tiers — each ladder is independent.
+                const tierMode = {
+                  euTierModeProxy: player.eu_tier_mode_proxy,
+                  euTierModeGrid: player.eu_tier_mode_grid,
+                  introTierModeProxy: player.intro_tier_mode_proxy,
+                  introTierModeGrid: player.intro_tier_mode_grid,
+                };
+                const punchTiers = getEUTiers(tierMode, "punchout");
+                const gepTiers = getEUTiers(tierMode, "gep");
+                const punchTier = getTier(stats?.punchTotal ?? 0, punchTiers);
+                const gepTier = getTier(stats?.gepTotal ?? 0, gepTiers);
                 const totalComm =
                   (stats?.euComm ?? 0) + (stats?.introComm ?? 0);
 
@@ -512,9 +551,10 @@ function PlayersPageContent() {
                     key={player.id}
                     player={player}
                     stats={stats}
-                    tier={tier}
-                    euTiers={euTiers}
-                    mainChannel={mainChannel}
+                    punchTier={punchTier}
+                    gepTier={gepTier}
+                    punchTiers={punchTiers}
+                    gepTiers={gepTiers}
                     totalComm={totalComm}
                     introducer={introducer}
                     isExpanded={isExpanded}
@@ -613,8 +653,10 @@ function PlayerFormDialog({
   description: string;
   form: {
     name: string;
-    eu_tier_mode: "A" | "B";
-    intro_tier_mode: "A" | "B";
+    eu_tier_mode_proxy: EUProxyMode;
+    eu_tier_mode_grid: EUGridMode;
+    intro_tier_mode_proxy: IntroMode;
+    intro_tier_mode_grid: IntroMode;
     introduced_by: string;
   };
   setForm: (
@@ -649,58 +691,106 @@ function PlayerFormDialog({
             />
           </div>
 
-          {/* Tier modes */}
+          {/* Tier modes — 4 toggles, stacked grid */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-500">
-                Player Tier Mode (Proxy)
+                Player Tier (Proxy)
               </label>
-              <div className="flex gap-1.5">
-                {(["A", "B"] as const).map((opt) => (
+              <div className="flex flex-col gap-1">
+                {EU_PROXY_MODES.map((opt) => (
                   <button
                     key={opt}
                     type="button"
                     onClick={() =>
-                      setForm((prev) => ({
-                        ...prev,
-                        eu_tier_mode: opt,
-                      }))
+                      setForm((prev) => ({ ...prev, eu_tier_mode_proxy: opt }))
                     }
                     className={cn(
-                      "flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                      form.eu_tier_mode === opt
+                      "rounded-md px-3 py-1.5 text-left text-[11px] font-medium transition-colors",
+                      form.eu_tier_mode_proxy === opt
                         ? "bg-brand-50 text-brand-600 ring-2 ring-brand-400"
                         : "bg-gray-100 text-gray-500 hover:bg-gray-200"
                     )}
                   >
-                    {opt === "A" ? "A (24-33%)" : "B (33-42%)"}
+                    {EU_PROXY_LABELS[opt]}
                   </button>
                 ))}
               </div>
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-500">
-                Intro Tier Mode (Grid)
+                Player Tier (Grid)
               </label>
-              <div className="flex gap-1.5">
-                {(["A", "B"] as const).map((opt) => (
+              <div className="flex flex-col gap-1">
+                {EU_GRID_MODES.map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() =>
+                      setForm((prev) => ({ ...prev, eu_tier_mode_grid: opt }))
+                    }
+                    className={cn(
+                      "rounded-md px-3 py-1.5 text-left text-[11px] font-medium transition-colors",
+                      form.eu_tier_mode_grid === opt
+                        ? "bg-brand-50 text-brand-600 ring-2 ring-brand-400"
+                        : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                    )}
+                  >
+                    {EU_GRID_LABELS[opt]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">
+                Intro Tier (Proxy)
+              </label>
+              <div className="flex flex-col gap-1">
+                {INTRO_MODES.map((opt) => (
                   <button
                     key={opt}
                     type="button"
                     onClick={() =>
                       setForm((prev) => ({
                         ...prev,
-                        intro_tier_mode: opt,
+                        intro_tier_mode_proxy: opt,
                       }))
                     }
                     className={cn(
-                      "flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                      form.intro_tier_mode === opt
+                      "rounded-md px-3 py-1.5 text-left text-[11px] font-medium transition-colors",
+                      form.intro_tier_mode_proxy === opt
                         ? "bg-purple-50 text-purple-600 ring-2 ring-purple-400"
                         : "bg-gray-100 text-gray-500 hover:bg-gray-200"
                     )}
                   >
-                    {opt === "A" ? "A (12-21%)" : "B (21-30%)"}
+                    {INTRO_PROXY_LABELS[opt]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-500">
+                Intro Tier (Grid)
+              </label>
+              <div className="flex flex-col gap-1">
+                {INTRO_MODES.map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() =>
+                      setForm((prev) => ({
+                        ...prev,
+                        intro_tier_mode_grid: opt,
+                      }))
+                    }
+                    className={cn(
+                      "rounded-md px-3 py-1.5 text-left text-[11px] font-medium transition-colors",
+                      form.intro_tier_mode_grid === opt
+                        ? "bg-purple-50 text-purple-600 ring-2 ring-purple-400"
+                        : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                    )}
+                  >
+                    {INTRO_GRID_LABELS[opt]}
                   </button>
                 ))}
               </div>
@@ -768,9 +858,10 @@ function PlayerFormDialog({
 function PlayerRow({
   player,
   stats,
-  tier,
-  euTiers,
-  mainChannel,
+  punchTier,
+  gepTier,
+  punchTiers,
+  gepTiers,
   totalComm,
   introducer,
   isExpanded,
@@ -794,9 +885,10 @@ function PlayerRow({
         punchTotal: number;
       }
     | undefined;
-  tier: { name: string; rate: number; min: number; max: number };
-  euTiers: { name: string; rate: number; min: number; max: number }[];
-  mainChannel: string;
+  punchTier: { name: string; rate: number; min: number; max: number };
+  gepTier: { name: string; rate: number; min: number; max: number };
+  punchTiers: { name: string; rate: number; min: number; max: number }[];
+  gepTiers: { name: string; rate: number; min: number; max: number }[];
   totalComm: number;
   introducer: DBPlayer | undefined;
   isExpanded: boolean;
@@ -809,8 +901,12 @@ function PlayerRow({
   onRequestDelete: () => void;
   onQuickTierUpdate: (
     id: string,
-    field: "eu_tier_mode" | "intro_tier_mode",
-    value: "A" | "B"
+    field:
+      | "eu_tier_mode_proxy"
+      | "eu_tier_mode_grid"
+      | "intro_tier_mode_proxy"
+      | "intro_tier_mode_grid",
+    value: string
   ) => void;
 }) {
   const playerPOs = monthPOs.filter(
@@ -839,9 +935,22 @@ function PlayerRow({
           {player.name}
         </TableCell>
         <TableCell>
-          <span className="font-mono text-xs font-medium text-brand-600">
-            {tier.name} ({tier.rate}%)
-          </span>
+          {(stats?.punchTotal ?? 0) === 0 && (stats?.gepTotal ?? 0) === 0 ? (
+            <span className="text-xs text-gray-400">--</span>
+          ) : (
+            <div className="flex flex-col gap-0.5">
+              {(stats?.punchTotal ?? 0) > 0 && (
+                <span className="font-mono text-xs font-medium text-accent-600">
+                  Proxy: {punchTier.name} ({punchTier.rate}%)
+                </span>
+              )}
+              {(stats?.gepTotal ?? 0) > 0 && (
+                <span className="font-mono text-xs font-medium text-brand-600">
+                  Grid: {gepTier.name} ({gepTier.rate}%)
+                </span>
+              )}
+            </div>
+          )}
         </TableCell>
         <TableCell className="font-mono text-sm">
           {(stats?.totalPO ?? 0) > 0 ? fmt(stats!.totalPO) : "--"}
@@ -859,8 +968,13 @@ function PlayerRow({
             )}
           </div>
         </TableCell>
-        <TableCell className="font-mono text-sm font-medium text-brand-600">
-          {totalComm > 0 ? fmt(totalComm) : "--"}
+        <TableCell
+          className={cn(
+            "font-mono text-sm font-medium",
+            totalComm < 0 ? "text-danger-600" : "text-brand-600"
+          )}
+        >
+          {totalComm === 0 ? "--" : fmtSigned(totalComm)}
         </TableCell>
         <TableCell className="text-xs text-gray-500">
           {introducer?.name ?? "--"}
@@ -895,27 +1009,47 @@ function PlayerRow({
         <TableRow className="bg-brand-50/20 hover:bg-brand-50/20">
           <TableCell colSpan={8} className="p-0">
             <div className="space-y-4 p-5">
-              {/* Tier mode quick toggles */}
-              <div className="flex gap-6">
+              {/* Tier mode quick toggles — 4 channels x mode pairs */}
+              <div className="grid grid-cols-2 gap-x-6 gap-y-3">
                 <div>
                   <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-500">
-                    Player Tier Mode (Proxy)
+                    Player Tier (Proxy)
                   </p>
                   <div className="flex gap-1">
-                    {(["A", "B"] as const).map((opt) => (
+                    {EU_PROXY_MODES.map((opt) => (
                       <button
                         key={opt}
                         type="button"
                         onClick={() =>
-                          onQuickTierUpdate(
-                            player.id,
-                            "eu_tier_mode",
-                            opt
-                          )
+                          onQuickTierUpdate(player.id, "eu_tier_mode_proxy", opt)
                         }
                         className={cn(
                           "rounded-md px-3 py-1 text-[10px] font-medium transition-colors",
-                          (player.eu_tier_mode ?? "A") === opt
+                          narrowEUProxy(player.eu_tier_mode_proxy) === opt
+                            ? "bg-brand-50 text-brand-600 ring-2 ring-brand-400"
+                            : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                        )}
+                      >
+                        {opt === "A_PLUS" ? "A+" : opt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                    Player Tier (Grid)
+                  </p>
+                  <div className="flex gap-1">
+                    {EU_GRID_MODES.map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() =>
+                          onQuickTierUpdate(player.id, "eu_tier_mode_grid", opt)
+                        }
+                        className={cn(
+                          "rounded-md px-3 py-1 text-[10px] font-medium transition-colors",
+                          narrowEUGrid(player.eu_tier_mode_grid) === opt
                             ? "bg-brand-50 text-brand-600 ring-2 ring-brand-400"
                             : "bg-gray-100 text-gray-500 hover:bg-gray-200"
                         )}
@@ -927,23 +1061,51 @@ function PlayerRow({
                 </div>
                 <div>
                   <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-500">
-                    Intro Tier Mode (Grid)
+                    Intro Tier (Proxy)
                   </p>
                   <div className="flex gap-1">
-                    {(["A", "B"] as const).map((opt) => (
+                    {INTRO_MODES.map((opt) => (
                       <button
                         key={opt}
                         type="button"
                         onClick={() =>
                           onQuickTierUpdate(
                             player.id,
-                            "intro_tier_mode",
+                            "intro_tier_mode_proxy",
                             opt
                           )
                         }
                         className={cn(
                           "rounded-md px-3 py-1 text-[10px] font-medium transition-colors",
-                          (player.intro_tier_mode ?? "A") === opt
+                          narrowIntro(player.intro_tier_mode_proxy) === opt
+                            ? "bg-purple-50 text-purple-600 ring-2 ring-purple-400"
+                            : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                        )}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-500">
+                    Intro Tier (Grid)
+                  </p>
+                  <div className="flex gap-1">
+                    {INTRO_MODES.map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() =>
+                          onQuickTierUpdate(
+                            player.id,
+                            "intro_tier_mode_grid",
+                            opt
+                          )
+                        }
+                        className={cn(
+                          "rounded-md px-3 py-1 text-[10px] font-medium transition-colors",
+                          narrowIntro(player.intro_tier_mode_grid) === opt
                             ? "bg-purple-50 text-purple-600 ring-2 ring-purple-400"
                             : "bg-gray-100 text-gray-500 hover:bg-gray-200"
                         )}
@@ -955,16 +1117,43 @@ function PlayerRow({
                 </div>
               </div>
 
-              {/* Tier progress */}
+              {/* Tier progress — one card per channel */}
               {(stats?.totalPO ?? 0) > 0 && (
-                <div className="max-w-xs">
-                  <TierCard
-                    tier={tier}
-                    tiers={euTiers}
-                    volume={stats!.totalPO}
-                    color={mainChannel === "gep" ? "brand" : "accent"}
-                    label="of pool"
-                  />
+                <div className="flex flex-wrap gap-6">
+                  {(stats?.punchTotal ?? 0) > 0 && (
+                    <div className="max-w-xs flex-1 rounded-lg border border-accent-100 bg-white p-4">
+                      <div className="mb-3 flex items-center gap-2">
+                        <ChannelBadge channel="punchout" />
+                        <span className="text-[10px] uppercase tracking-wider text-gray-500">
+                          Tier Progress
+                        </span>
+                      </div>
+                      <TierCard
+                        tier={punchTier}
+                        tiers={punchTiers}
+                        volume={stats!.punchTotal}
+                        color="accent"
+                        label="of pool"
+                      />
+                    </div>
+                  )}
+                  {(stats?.gepTotal ?? 0) > 0 && (
+                    <div className="max-w-xs flex-1 rounded-lg border border-brand-100 bg-white p-4">
+                      <div className="mb-3 flex items-center gap-2">
+                        <ChannelBadge channel="gep" />
+                        <span className="text-[10px] uppercase tracking-wider text-gray-500">
+                          Tier Progress
+                        </span>
+                      </div>
+                      <TierCard
+                        tier={gepTier}
+                        tiers={gepTiers}
+                        volume={stats!.gepTotal}
+                        color="brand"
+                        label="of pool"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1014,6 +1203,7 @@ function PlayerRow({
                         );
                         const status = getPOStatus(po);
                         const commStatus = getCommissionStatus(po);
+                        const netEuComm = w.euAmt - w.playerLossShare;
                         return (
                           <TableRow key={po.id}>
                             <TableCell className="font-mono text-xs font-medium text-brand-600">
@@ -1032,8 +1222,13 @@ function PlayerRow({
                             <TableCell className="font-mono text-xs">
                               {fmt(po.po_amount)}
                             </TableCell>
-                            <TableCell className="font-mono text-xs font-medium text-brand-600">
-                              {fmt(w.euAmt)}
+                            <TableCell
+                              className={cn(
+                                "font-mono text-xs font-medium",
+                                netEuComm < 0 ? "text-danger-600" : "text-brand-600"
+                              )}
+                            >
+                              {fmtSigned(netEuComm)}
                             </TableCell>
                             <TableCell>
                               <StatusBadge status={status} />
@@ -1055,8 +1250,13 @@ function PlayerRow({
                         <TableCell className="font-mono text-xs font-medium">
                           {fmt(stats?.totalPO ?? 0)}
                         </TableCell>
-                        <TableCell className="font-mono text-xs font-medium text-brand-600">
-                          {fmt(stats?.euComm ?? 0)}
+                        <TableCell
+                          className={cn(
+                            "font-mono text-xs font-medium",
+                            (stats?.euComm ?? 0) < 0 ? "text-danger-600" : "text-brand-600"
+                          )}
+                        >
+                          {fmtSigned(stats?.euComm ?? 0)}
                         </TableCell>
                         <TableCell colSpan={2} />
                       </TableRow>
@@ -1101,14 +1301,39 @@ function IntroducerEarnings({
   wAllPOs: WaterfallPO[];
   introComm: number;
 }) {
+  void player;
+  const [expandedRecruitId, setExpandedRecruitId] = useState<string | null>(
+    null
+  );
+
   const recruitData = recruits.map((r) => {
     const rPOs = monthPOs.filter((po) => po.end_user_id === r.id);
-    const rTotal = rPOs.reduce((s, po) => s + po.po_amount, 0);
-    const rIntro = rPOs.reduce((s, po) => {
-      const w = calcPOWaterfall(toWaterfallPO(po), wPlayers, wAllPOs, po.po_amount);
-      return s + w.introAmt;
-    }, 0);
-    return { name: r.name, monthlyPO: rTotal, introComm: rIntro };
+    const poBreakdown = rPOs.map((po) => {
+      const w = calcPOWaterfall(
+        toWaterfallPO(po),
+        wPlayers,
+        wAllPOs,
+        po.po_amount
+      );
+      return {
+        id: po.id,
+        ref: po.ref,
+        date: po.po_date,
+        channel: po.channel as "punchout" | "gep",
+        poAmount: po.po_amount,
+        netIntroAmt: w.introAmt - w.introducerLossShare,
+        commStatus: getCommissionStatus(po),
+      };
+    });
+    const rTotal = poBreakdown.reduce((s, p) => s + p.poAmount, 0);
+    const rIntro = poBreakdown.reduce((s, p) => s + p.netIntroAmt, 0);
+    return {
+      id: r.id,
+      name: r.name,
+      monthlyPO: rTotal,
+      introComm: rIntro,
+      pos: poBreakdown,
+    };
   });
 
   const groupPO = recruitData.reduce((s, r) => s + r.monthlyPO, 0);
@@ -1121,6 +1346,7 @@ function IntroducerEarnings({
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-6 pr-0" />
             <TableHead className="text-[9px] uppercase tracking-wider text-purple-600">
               Recruit
             </TableHead>
@@ -1133,26 +1359,147 @@ function IntroducerEarnings({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {recruitData.map((r) => (
-            <TableRow key={r.name}>
-              <TableCell className="text-xs font-medium">
-                {r.name}
-              </TableCell>
-              <TableCell className="font-mono text-xs">
-                {fmt(r.monthlyPO)}
-              </TableCell>
-              <TableCell className="font-mono text-xs font-medium text-purple-600">
-                {fmt(r.introComm)}
-              </TableCell>
-            </TableRow>
-          ))}
+          {recruitData.map((r) => {
+            const isExpanded = expandedRecruitId === r.id;
+            return (
+              <Fragment key={r.id}>
+                <TableRow
+                  className={cn(
+                    "cursor-pointer",
+                    isExpanded && "bg-purple-100/40"
+                  )}
+                  onClick={() =>
+                    setExpandedRecruitId(isExpanded ? null : r.id)
+                  }
+                >
+                  <TableCell className="w-6 pr-0">
+                    {isExpanded ? (
+                      <ChevronDown
+                        className="size-3.5 text-purple-600"
+                        strokeWidth={2}
+                      />
+                    ) : (
+                      <ChevronRight
+                        className="size-3.5 text-purple-600"
+                        strokeWidth={2}
+                      />
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs font-medium">
+                    {r.name}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {fmt(r.monthlyPO)}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      "font-mono text-xs font-medium",
+                      r.introComm < 0
+                        ? "text-danger-600"
+                        : "text-purple-600"
+                    )}
+                  >
+                    {fmtSigned(r.introComm)}
+                  </TableCell>
+                </TableRow>
+
+                {isExpanded && (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell
+                      colSpan={4}
+                      className="border-b border-purple-100 bg-purple-50/40 px-2 pb-4 pt-0"
+                    >
+                      <div className="rounded-lg border border-purple-100 bg-white p-3">
+                        {r.pos.length === 0 ? (
+                          <p className="text-center text-xs text-gray-500">
+                            No POs this month
+                          </p>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="text-[9px] uppercase tracking-wider text-purple-600">
+                                  Ref
+                                </TableHead>
+                                <TableHead className="text-[9px] uppercase tracking-wider text-purple-600">
+                                  Date
+                                </TableHead>
+                                <TableHead className="text-[9px] uppercase tracking-wider text-purple-600">
+                                  Channel
+                                </TableHead>
+                                <TableHead className="text-right text-[9px] uppercase tracking-wider text-purple-600">
+                                  PO Amount
+                                </TableHead>
+                                <TableHead className="text-right text-[9px] uppercase tracking-wider text-purple-600">
+                                  Intro Commission
+                                </TableHead>
+                                <TableHead className="text-[9px] uppercase tracking-wider text-purple-600">
+                                  Comm Status
+                                </TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {r.pos.map((p) => (
+                                <TableRow key={p.id}>
+                                  <TableCell
+                                    className={cn(
+                                      "font-mono text-xs font-medium",
+                                      p.channel === "gep"
+                                        ? "text-brand-600"
+                                        : "text-accent-600"
+                                    )}
+                                  >
+                                    {p.ref}
+                                  </TableCell>
+                                  <TableCell className="text-xs text-gray-500">
+                                    {p.date}
+                                  </TableCell>
+                                  <TableCell>
+                                    <ChannelBadge channel={p.channel} />
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono text-xs">
+                                    {fmt(p.poAmount)}
+                                  </TableCell>
+                                  <TableCell
+                                    className={cn(
+                                      "text-right font-mono text-xs font-medium",
+                                      p.netIntroAmt < 0
+                                        ? "text-danger-600"
+                                        : "text-purple-600"
+                                    )}
+                                  >
+                                    {fmtSigned(p.netIntroAmt)}
+                                  </TableCell>
+                                  <TableCell>
+                                    <CommissionStatusBadge
+                                      status={p.commStatus}
+                                    />
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
+            );
+          })}
           <TableRow className="border-t-2 border-gray-200">
+            <TableCell />
             <TableCell className="text-xs font-medium">Total</TableCell>
             <TableCell className="font-mono text-xs font-medium">
               {fmt(groupPO)}
             </TableCell>
-            <TableCell className="font-mono text-xs font-medium text-purple-600">
-              {fmt(introComm)}
+            <TableCell
+              className={cn(
+                "font-mono text-xs font-medium",
+                introComm < 0 ? "text-danger-600" : "text-purple-600"
+              )}
+            >
+              {fmtSigned(introComm)}
             </TableCell>
           </TableRow>
         </TableBody>

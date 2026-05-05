@@ -1762,4 +1762,98 @@ const backfillInvestors: DeploymentInvestor[] = [
   );
 }
 
+// ── Test 19: new PO dated same day as a capital batch is not double-funded ──
+// Reproduces the user's screenshot scenario:
+//   - 3 investors A (joined Feb 1, introducer), B & C (joined Feb 8)
+//   - Three earlier POs (PRX-001/002/003) tie up A's initial capital
+//   - PRX-001 clears on Feb 8 — same day a NEW PO PRX-004 is created Feb 8
+// Pre-fix: capital-batch backfill loop's strict ">" let it claim PRX-004 as
+// an "older unfunded PO", filling it from the freshly-credited pool. Then
+// the alloc event for PRX-004 fired and topped it up again from the
+// remainder, producing 10,400 against a 10,000 PO. The bug also fires when
+// PRX-004 is dated Feb 15 (PRX-002's clear date) — there 10,000 of returned
+// capital is sitting on the table, so the double-fill produces 20,000.
+{
+  const invs: DeploymentInvestor[] = [
+    { id: "A", name: "A", capital: 10_400, dateJoined: "2026-02-01" },
+    { id: "B", name: "B", capital: 10_000, dateJoined: "2026-02-08" },
+    { id: "C", name: "C", capital: 10_000, dateJoined: "2026-02-08" },
+  ];
+  const prx001: DeploymentPO = {
+    id: "prx-001",
+    ref: "PRX-001",
+    poDate: "2026-02-02",
+    poAmount: 10_000,
+    channel: "proxy",
+    dos: [{ buyerPaid: "2026-02-08" }],
+    commissionsCleared: "2026-02-08",
+  };
+  const prx002: DeploymentPO = {
+    id: "prx-002",
+    ref: "PRX-002",
+    poDate: "2026-02-02",
+    poAmount: 10_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+  const prx003: DeploymentPO = {
+    id: "prx-003",
+    ref: "PRX-003",
+    poDate: "2026-02-03",
+    poAmount: 10_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+  // PRX-004 — the new PO whose date triggers the bug.
+  const prx004: DeploymentPO = {
+    id: "prx-004",
+    ref: "PRX-004",
+    poDate: "2026-02-08",
+    poAmount: 10_000,
+    channel: "proxy",
+    dos: [],
+    commissionsCleared: null,
+  };
+  // PRX-001's RM 400 return is reinvested into A's capital on Feb 8 —
+  // same day as PRX-004's poDate. This collision is the bug trigger.
+  const events: CapitalEvent[] = [
+    { investorId: "A", date: "2026-02-08", delta: 400 },
+  ];
+
+  const { deployments } = calcSharedDeployments(
+    [prx001, prx002, prx003, prx004],
+    invs,
+    events,
+    "2026-02"
+  );
+
+  const sumFor = (poId: string) =>
+    deployments
+      .filter((d) => d.poId === poId)
+      .reduce((s, d) => s + d.deployed, 0);
+
+  // The headline assertion: PRX-004 must not be over-funded.
+  assert.equal(
+    sumFor("prx-004"),
+    10_000,
+    `PRX-004 must be funded exactly to its poAmount, got ${sumFor("prx-004")}`
+  );
+  // And per-investor share should be > 0 across all three (pro-rata split).
+  for (const id of ["A", "B", "C"]) {
+    const got = deployments
+      .filter((d) => d.poId === "prx-004" && d.investorId === id)
+      .reduce((s, d) => s + d.deployed, 0);
+    assert.ok(
+      got > 0,
+      `${id} should have a positive PRX-004 share (pro-rata), got ${got}`
+    );
+  }
+
+  console.log(
+    "✓ New PO dated same day as a capital batch is funded exactly once"
+  );
+}
+
 console.log("\nAll deployment tests passed.");

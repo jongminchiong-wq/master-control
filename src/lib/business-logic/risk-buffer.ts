@@ -1,6 +1,6 @@
 // Risk buffer calculations — extracted from master-control-v2.jsx lines 94–105
 
-import { BUFFER_TABLE, URGENCY } from "./constants";
+import { BUFFER_TABLE } from "./constants";
 import type { RBPOTier } from "./constants";
 
 export const getRBTierId = (cost: number): RBPOTier["id"] => {
@@ -19,11 +19,8 @@ export const getDeliveryIdx = (id: string): number => {
 // Per-DO risk buffer calculation
 export const calcBufferPct = (
   supplierCost: number,
-  delivery: string,
-  urgency: string
+  delivery: string
 ): number => {
   const tierId = getRBTierId(supplierCost);
-  const baseBuffer = BUFFER_TABLE[tierId][getDeliveryIdx(delivery)];
-  const urg = URGENCY.find((u) => u.id === urgency);
-  return baseBuffer + (urg?.extra || 0);
+  return BUFFER_TABLE[tierId][getDeliveryIdx(delivery)];
 };

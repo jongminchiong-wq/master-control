@@ -11,6 +11,7 @@ export interface DeploymentPO {
   poDate: string;
   poAmount: number;
   channel: string;
+  description?: string | null;
   dos?: Array<{ buyerPaid?: string | null }>;
   commissionsCleared?: string | null;
 }
@@ -42,6 +43,7 @@ export interface Deployment {
   poDate: string;
   poAmount: number;
   channel: string;
+  description?: string | null;
   deployed: number;
   returnAmt: number;
   returnRate: number;
@@ -357,9 +359,12 @@ export const calcSharedDeployments = (
         );
 
       // Pro-rata fill older unfunded POs from the batched pool, oldest-
-      // first so the earliest gap fills first.
+      // first so the earliest gap fills first. Strictly older: a same-day
+      // PO is left for its own alloc event later in this day's timeline
+      // (alloc fires after capital), otherwise the batch fills it here AND
+      // the alloc event tops it up again, double-funding the PO.
       for (const po of sortedPOs) {
-        if ((po.poDate || "") > batchDate) break;
+        if ((po.poDate || "") >= batchDate) break;
 
         const poAmt = po.poAmount || 0;
         if (poAmt <= 0) continue;
@@ -438,6 +443,7 @@ export const calcSharedDeployments = (
             poDate: po.poDate,
             poAmount: po.poAmount,
             channel: po.channel,
+            description: po.description ?? null,
             deployed,
             returnAmt: deployed * (invTier.rate / 100),
             returnRate: invTier.rate,
@@ -470,13 +476,16 @@ export const calcSharedDeployments = (
     );
     if (totalAvail <= 0) continue;
 
-    const toFund = Math.min(poAmt, totalAvail);
+    // Subtract anything already deployed (e.g. by a same-day capital-batch
+    // backfill) so this alloc never doubles up on top of an existing fill.
+    const allocsForPO = (deployedByPO[po.id] ||= []);
+    const alreadyDeployed = allocsForPO.reduce((s, a) => s + a.deployed, 0);
+    const toFund = Math.min(poAmt - alreadyDeployed, totalAvail);
+    if (toFund <= 0) continue;
     let allocated = 0;
     const eligible = eligibleInvestors.filter(
       (inv) => (remaining[inv.id] || 0) > 0
     );
-
-    const allocsForPO = (deployedByPO[po.id] ||= []);
 
     for (let idx = 0; idx < eligible.length; idx++) {
       const inv = eligible[idx];
@@ -507,6 +516,7 @@ export const calcSharedDeployments = (
         poDate: po.poDate,
         poAmount: po.poAmount,
         channel: po.channel,
+        description: po.description ?? null,
         deployed,
         returnAmt: returnAmtTiered,
         returnRate: invReturnRate,
@@ -630,6 +640,7 @@ export const calcSharedDeployments = (
         poDate: po.poDate,
         poAmount: po.poAmount,
         channel: po.channel,
+        description: po.description ?? null,
         deployed,
         returnAmt: returnAmtTiered,
         returnRate: invReturnRate,

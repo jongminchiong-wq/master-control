@@ -117,8 +117,10 @@ async function main() {
   // Mappers — match entity/page.tsx exactly.
   const wPlayers: Player[] = players.map((p) => ({
     id: p.id,
-    euTierMode: p.eu_tier_mode ?? "A",
-    introTierMode: p.intro_tier_mode ?? "A",
+    euTierModeProxy: p.eu_tier_mode_proxy,
+    euTierModeGrid: p.eu_tier_mode_grid,
+    introTierModeProxy: p.intro_tier_mode_proxy,
+    introTierModeGrid: p.intro_tier_mode_grid,
     introducedBy: p.introduced_by,
   }));
 
@@ -131,7 +133,6 @@ async function main() {
     dos: (po.delivery_orders ?? []).map((d) => ({
       amount: d.amount,
       delivery: d.delivery ?? "local",
-      urgency: d.urgency ?? "normal",
     })),
   }));
 

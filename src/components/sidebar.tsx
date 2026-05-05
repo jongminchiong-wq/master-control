@@ -17,6 +17,7 @@ type NavItem = {
 type SidebarProps = {
   navItems: NavItem[];
   footerNavItems?: NavItem[];
+  showUserBadge?: boolean;
 };
 
 const STORAGE_KEY = "mc.sidebar.collapsed";
@@ -91,7 +92,7 @@ function renderNavItem(
   );
 }
 
-export function Sidebar({ navItems, footerNavItems = [] }: SidebarProps) {
+export function Sidebar({ navItems, footerNavItems = [], showUserBadge = true }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const collapsed = useSyncExternalStore(subscribe, getCollapsed, () => false);
@@ -167,7 +168,7 @@ export function Sidebar({ navItems, footerNavItems = [] }: SidebarProps) {
 
       {/* Footer */}
       <div className="space-y-0.5 border-t border-gray-200 px-2 py-3">
-        <UserBadge iconOnly={collapsed} />
+        {showUserBadge && <UserBadge iconOnly={collapsed} />}
         {footerNavItems.map((item) => renderNavItem(item, pathname, collapsed, preservedQuery))}
         <LogoutButton iconOnly={collapsed} />
       </div>

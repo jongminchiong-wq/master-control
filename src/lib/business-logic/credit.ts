@@ -22,6 +22,11 @@ import {
   type CapitalEvent,
 } from "./deployment";
 import { getInvIntroTier } from "./tiers";
+import {
+  calcPOWaterfall,
+  type Player as WaterfallPlayer,
+  type PurchaseOrder as WaterfallPO,
+} from "./waterfall";
 
 export interface CreditPOReturnsArgs {
   supabase: SupabaseClient;
@@ -225,6 +230,198 @@ export async function creditIntroducerCommissions({
     } else if (payload?.error) {
       result.errors.push(`${dep.investorName}: ${payload.error}`);
     }
+  }
+
+  return result;
+}
+
+// ── Player commission crediting ─────────────────────────────
+//
+// Mirrors creditPOReturns/creditIntroducerCommissions but for the
+// player-side ledger introduced in migration 015. For the PO that just
+// cleared, run calcPOWaterfall and credit:
+//   - the EU player (po.endUserId) at euAmt and the EU tier rate
+//   - the EU's introducer (if any) at introAmt and the intro tier rate
+//
+// The dashboard previews these numbers on the assumption of full
+// funding (totalDeployed = po.poAmount); we use the same assumption
+// here so a player's "Cleared" tile matches what gets ledgered.
+//
+// Idempotent via UNIQUE (player_id, po_id, type) — refires are no-ops.
+
+export interface CreditPlayerCommissionsArgs {
+  supabase: SupabaseClient;
+  poId: string;
+  clearDate: string;
+  players: WaterfallPlayer[];
+  pos: WaterfallPO[];
+}
+
+export async function creditPlayerCommissions({
+  supabase,
+  poId,
+  clearDate,
+  players,
+  pos,
+}: CreditPlayerCommissionsArgs): Promise<CreditPOReturnsResult> {
+  const result: CreditPOReturnsResult = {
+    credited: 0,
+    duplicates: 0,
+    errors: [],
+  };
+
+  const po = pos.find((p) => p.id === poId);
+  if (!po) {
+    result.errors.push(`PO ${poId} not found in snapshot`);
+    return result;
+  }
+
+  const w = calcPOWaterfall(po, players, pos, po.poAmount);
+  const creditDateIso = `${clearDate}T00:00:00Z`;
+
+  const credit = async (
+    playerId: string,
+    type: "eu" | "intro",
+    amount: number,
+    tierRate: number,
+    baseAmount: number | null,
+  ) => {
+    if (amount <= 0) return;
+    const { data, error } = await supabase.rpc("credit_player_commission", {
+      p_player_id: playerId,
+      p_po_id: poId,
+      p_type: type,
+      p_amount: amount,
+      p_tier_rate: tierRate,
+      p_base_amount: baseAmount,
+      p_credit_date: creditDateIso,
+    });
+    if (error) {
+      result.errors.push(`${type} ${playerId}: ${error.message}`);
+      return;
+    }
+    const payload = data as
+      | { success: boolean; error?: string; duplicate?: boolean; skipped?: boolean }
+      | null;
+    if (payload?.duplicate) {
+      result.duplicates++;
+    } else if (payload?.success) {
+      if (!payload.skipped) result.credited++;
+    } else if (payload?.error) {
+      result.errors.push(`${type} ${playerId}: ${payload.error}`);
+    }
+  };
+
+  await credit(po.endUserId, "eu", w.euAmt, w.euTier.rate, null);
+
+  if (w.intro && w.introTier) {
+    await credit(
+      w.intro.id,
+      "intro",
+      w.introAmt,
+      w.introTier.rate,
+      w.entityGross,
+    );
+  }
+
+  return result;
+}
+
+// ── Player loss debit crediting ─────────────────────────────
+//
+// Mirror of creditPlayerCommissions but for the loss side. When a PO
+// clears with raw supplier cost > PO amount, the cost overrun is split
+// among Player, Entity, and Introducer using the same tier percentages
+// they would have earned on profit (mirror split). The player and
+// introducer shares are recorded as DEBITS in player_loss_debits and
+// permanently reduce the player's available withdrawal balance.
+//
+// No-op when the PO has no cost overrun (rawLoss === 0). Idempotent
+// via UNIQUE (player_id, po_id, type) — refires are safe.
+
+export type CreditPlayerLossDebitsArgs = CreditPlayerCommissionsArgs;
+
+export async function creditPlayerLossDebits({
+  supabase,
+  poId,
+  clearDate,
+  players,
+  pos,
+}: CreditPlayerLossDebitsArgs): Promise<CreditPOReturnsResult> {
+  const result: CreditPOReturnsResult = {
+    credited: 0,
+    duplicates: 0,
+    errors: [],
+  };
+
+  const po = pos.find((p) => p.id === poId);
+  if (!po) {
+    result.errors.push(`PO ${poId} not found in snapshot`);
+    return result;
+  }
+
+  const w = calcPOWaterfall(po, players, pos, po.poAmount);
+  if (w.rawLoss <= 0) return result;
+
+  const clearedAtIso = `${clearDate}T00:00:00Z`;
+
+  const debit = async (
+    playerId: string,
+    type: "eu" | "intro",
+    amount: number,
+    tierRate: number,
+    baseAmount: number | null,
+    introduceeId: string | null,
+  ) => {
+    if (amount <= 0) return;
+    const { data, error } = await supabase.rpc("credit_player_loss_debit", {
+      p_player_id: playerId,
+      p_po_id: poId,
+      p_type: type,
+      p_amount: amount,
+      p_tier_rate: tierRate,
+      p_base_amount: baseAmount,
+      p_introducee_id: introduceeId,
+      p_cleared_at: clearedAtIso,
+    });
+    if (error) {
+      result.errors.push(`${type} ${playerId}: ${error.message}`);
+      return;
+    }
+    const payload = data as
+      | { success: boolean; error?: string; duplicate?: boolean; skipped?: boolean }
+      | null;
+    if (payload?.duplicate) {
+      result.duplicates++;
+    } else if (payload?.success) {
+      if (!payload.skipped) result.credited++;
+    } else if (payload?.error) {
+      result.errors.push(`${type} ${playerId}: ${payload.error}`);
+    }
+  };
+
+  // Player (EU) absorbs at their EU tier rate.
+  await debit(
+    po.endUserId,
+    "eu",
+    w.playerLossShare,
+    w.euTier.rate,
+    w.rawLoss,
+    null,
+  );
+
+  // Introducer absorbs at their intro tier rate. introduceeId points
+  // back to the player whose PO triggered the loss, mirroring the
+  // base_amount + introducee_id pattern on profit-side intro credits.
+  if (w.intro && w.introTier) {
+    await debit(
+      w.intro.id,
+      "intro",
+      w.introducerLossShare,
+      w.introTier.rate,
+      w.rawLoss - w.playerLossShare,
+      po.endUserId,
+    );
   }
 
   return result;

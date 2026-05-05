@@ -72,29 +72,29 @@ export function FundingOpportunities({
       <div className="px-6">
         {unfundedPOs.map((po) => {
           const expectedReturn = po.unfunded * (investorTierRate / 100);
-          const ageLabel =
-            po.ageDays === 0
-              ? "Posted today"
-              : `${po.ageDays} day${po.ageDays !== 1 ? "s" : ""} unfunded`;
           return (
             <div
               key={po.poId}
-              className="grid grid-cols-[auto_1fr_1fr_auto] items-center gap-5 border-b border-purple-100 py-4 last:border-b-0"
+              className="grid grid-cols-[80px_1fr_1fr_1fr_auto] items-center gap-5 border-b border-purple-100 py-4 last:border-b-0"
             >
               <span
                 className={cn(
-                  "font-mono text-sm font-medium",
+                  "font-mono text-xs font-medium",
                   po.channel === "gep" ? "text-brand-600" : "text-purple-600"
                 )}
               >
                 {po.ref}
               </span>
-              <div>
-                <p className="font-mono text-sm font-medium text-gray-800">
-                  {fmt(po.unfunded)}
+              {po.description ? (
+                <p className="text-sm font-medium text-gray-800">
+                  {po.description}
                 </p>
-                <p className="mt-0.5 text-[11px] text-gray-500">{ageLabel}</p>
-              </div>
+              ) : (
+                <p className="text-sm italic text-gray-400">No description</p>
+              )}
+              <p className="font-mono text-sm font-medium text-gray-800">
+                {fmt(po.unfunded)}
+              </p>
               <div>
                 <p className="font-mono text-sm font-medium text-purple-600">
                   + {fmt(expectedReturn)}

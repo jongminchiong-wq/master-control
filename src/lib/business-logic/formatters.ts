@@ -3,6 +3,13 @@
 export const fmt = (n: number): string =>
   "RM " + Math.round(n).toLocaleString("en-MY");
 
+export const fmtSigned = (n: number): string => {
+  const r = Math.round(n);
+  return r < 0
+    ? "-RM " + Math.abs(r).toLocaleString("en-MY")
+    : "RM " + r.toLocaleString("en-MY");
+};
+
 export const fmtDec = (n: number): string =>
   n.toLocaleString("en-MY", {
     minimumFractionDigits: 2,

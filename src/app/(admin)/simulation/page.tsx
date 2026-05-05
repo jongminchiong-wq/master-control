@@ -8,9 +8,12 @@ import {
   INV_RATE,
   INV_TIERS,
   PO_EU_A,
+  PO_EU_A_PLUS,
   PO_EU_B,
   PO_EU_C,
+  PO_EU_C_EXCLUSIVE,
   PO_INTRO,
+  PO_INTRO_EXCLUSIVE,
   PO_INTRO_B,
   GEP_INTRO_B,
   INV_INTRO_TIERS,
@@ -18,6 +21,16 @@ import {
 } from "@/lib/business-logic/constants";
 import { getTier, getInvIntroTier } from "@/lib/business-logic/tiers";
 import { fmt } from "@/lib/business-logic/formatters";
+
+type EUProxyMode = "A" | "A_PLUS" | "B";
+type EUGridMode = "A" | "B";
+type IntroMode = "A" | "B";
+
+const PUNCHOUT_EU_TABLES: Record<EUProxyMode, Tier[]> = {
+  A: PO_EU_A,
+  A_PLUS: PO_EU_A_PLUS,
+  B: PO_EU_B,
+};
 
 // Shared components
 import { MetricCard } from "@/components/metric-card";
@@ -86,28 +99,22 @@ function SliderField({
   );
 }
 
-// ── Toggle button pair ─────────────────────────────────────
+// ── Generic tier-mode toggle group ─────────────────────────
 
-function ToggleAB({
+function ToggleGroup<T extends string>({
   mode,
   setMode,
-  labelA,
-  labelB,
-  titleA = "Default",
-  titleB = "Exclusive",
+  options,
   colorClass,
 }: {
-  mode: "A" | "B";
-  setMode: (m: "A" | "B") => void;
-  labelA: string;
-  labelB: string;
-  titleA?: string;
-  titleB?: string;
+  mode: T;
+  setMode: (m: T) => void;
+  options: { value: T; title: string; rates: string }[];
   colorClass: string;
 }) {
   const btnClasses = (active: boolean) =>
     cn(
-      "flex-1 rounded-lg px-3 py-2.5 text-center text-xs font-medium transition-colors",
+      "flex-1 rounded-lg px-2 py-2.5 text-center text-xs font-medium transition-colors",
       active
         ? `ring-2 ${colorClass} bg-opacity-5`
         : "border border-gray-200 text-gray-500 hover:bg-gray-50"
@@ -115,14 +122,16 @@ function ToggleAB({
 
   return (
     <div className="flex gap-2">
-      <button onClick={() => setMode("A")} className={btnClasses(mode === "A")}>
-        <p className="text-xs font-medium">{titleA}</p>
-        <p className="mt-0.5 text-[9px] opacity-70">{labelA}</p>
-      </button>
-      <button onClick={() => setMode("B")} className={btnClasses(mode === "B")}>
-        <p className="text-xs font-medium">{titleB}</p>
-        <p className="mt-0.5 text-[9px] opacity-70">{labelB}</p>
-      </button>
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          onClick={() => setMode(opt.value)}
+          className={btnClasses(mode === opt.value)}
+        >
+          <p className="text-xs font-medium">{opt.title}</p>
+          <p className="mt-0.5 text-[9px] opacity-70">{opt.rates}</p>
+        </button>
+      ))}
     </div>
   );
 }
@@ -188,8 +197,8 @@ function InvestorTierSelector({
             <span className="mt-0.5 text-[9px] text-gray-500">
               {t.min === 0 ? "<" : ""}RM{" "}
               {t.max === Infinity
-                ? `${t.min / 1000}K+`
-                : `${t.min / 1000}K-${t.max / 1000}K`}
+                ? `${Math.ceil(t.min / 1000)}K+`
+                : `${Math.ceil(t.min / 1000)}K-${t.max / 1000}K`}
             </span>
           </button>
         );
@@ -237,8 +246,9 @@ export default function SimulationPage() {
   // Channel
   const [punchoutOn, setPunchoutOn] = useState(true);
 
-  // EU tier mode (Punchout only)
-  const [euTierMode, setEuTierMode] = useState<"A" | "B">("A");
+  // EU tier modes — independent per channel (DB defaults: Proxy=A, Grid=B)
+  const [euTierModeProxy, setEuTierModeProxy] = useState<EUProxyMode>("A");
+  const [euTierModeGrid, setEuTierModeGrid] = useState<EUGridMode>("B");
 
   // Deal variables
   const [monthlyPOVol, setMonthlyPOVol] = useState(100000);
@@ -250,8 +260,9 @@ export default function SimulationPage() {
   // End-user network
   const [numEndUsers, setNumEndUsers] = useState(1);
 
-  // EU introducer
-  const [introTierMode, setIntroTierMode] = useState<"A" | "B">("A");
+  // EU introducer modes — independent per channel (DB defaults: Proxy=B, Grid=A)
+  const [introTierModeProxy, setIntroTierModeProxy] = useState<IntroMode>("B");
+  const [introTierModeGrid, setIntroTierModeGrid] = useState<IntroMode>("A");
 
   // Investor network
   const [numInvestors, setNumInvestors] = useState(1);
@@ -272,22 +283,24 @@ export default function SimulationPage() {
     const invTier = INV_TIERS[invTierIdx];
     const invRate = invTier.rate;
 
-    // EU tier
+    // EU tier — each channel reads its own mode independently.
     const EU_TIERS: Tier[] = !punchoutOn
-      ? PO_EU_C
-      : euTierMode === "B"
-        ? PO_EU_B
-        : PO_EU_A;
+      ? euTierModeGrid === "B"
+        ? PO_EU_C_EXCLUSIVE
+        : PO_EU_C
+      : PUNCHOUT_EU_TABLES[euTierModeProxy];
     const euTier = getTier(monthlyPOVol, EU_TIERS);
     const endUserRate = euTier.rate;
 
     // Total group PO
     const totalGroupPO = monthlyPOVol * numEndUsers;
 
-    // EU introducer tier
+    // Introducer tier — each channel reads its own mode independently.
     const INTRO_TIERS_PO: Tier[] = punchoutOn
-      ? PO_INTRO
-      : introTierMode === "B"
+      ? introTierModeProxy === "B"
+        ? PO_INTRO_EXCLUSIVE
+        : PO_INTRO
+      : introTierModeGrid === "B"
         ? GEP_INTRO_B
         : PO_INTRO_B;
     const introTier = getTier(totalGroupPO, INTRO_TIERS_PO);
@@ -351,12 +364,14 @@ export default function SimulationPage() {
     };
   }, [
     punchoutOn,
-    euTierMode,
+    euTierModeProxy,
+    euTierModeGrid,
     monthlyPOVol,
     cogsPercent,
     invTierIdx,
     numEndUsers,
-    introTierMode,
+    introTierModeProxy,
+    introTierModeGrid,
     numInvestors,
     avgInvCapital,
     opexRental,
@@ -416,15 +431,24 @@ export default function SimulationPage() {
               Player tier system
             </p>
             {!punchoutOn ? (
-              <div className="rounded-lg border border-brand-100 bg-brand-50 px-3 py-2 text-center text-xs font-medium text-brand-600">
-                Fixed at 21 / 24 / 27 / 30% (Grid)
-              </div>
+              <ToggleGroup
+                mode={euTierModeGrid}
+                setMode={setEuTierModeGrid}
+                options={[
+                  { value: "A", title: "Default", rates: "21 / 24 / 27 / 30%" },
+                  { value: "B", title: "Exclusive", rates: "24 / 27 / 30 / 33%" },
+                ]}
+                colorClass="ring-brand-400 text-brand-600 bg-brand-50"
+              />
             ) : (
-              <ToggleAB
-                mode={euTierMode}
-                setMode={setEuTierMode}
-                labelA="24 / 27 / 30 / 33%"
-                labelB="33 / 36 / 39 / 42%"
+              <ToggleGroup
+                mode={euTierModeProxy}
+                setMode={setEuTierModeProxy}
+                options={[
+                  { value: "A", title: "Default", rates: "24 / 27 / 30 / 33%" },
+                  { value: "A_PLUS", title: "Premium", rates: "30 / 33 / 36 / 39%" },
+                  { value: "B", title: "Exclusive", rates: "33 / 36 / 39 / 42%" },
+                ]}
                 colorClass="ring-brand-400 text-brand-600 bg-brand-50"
               />
             )}
@@ -514,15 +538,23 @@ export default function SimulationPage() {
                 Player introducer tier (auto from group PO)
               </p>
               {punchoutOn ? (
-                <div className="rounded-lg border border-purple-100 bg-purple-50 px-3 py-2 text-center text-xs font-medium text-purple-600">
-                  Fixed at 9 / 12 / 15 / 18% (Proxy active)
-                </div>
+                <ToggleGroup
+                  mode={introTierModeProxy}
+                  setMode={setIntroTierModeProxy}
+                  options={[
+                    { value: "A", title: "Default", rates: "9 / 12 / 15 / 18%" },
+                    { value: "B", title: "Exclusive", rates: "12 / 15 / 18 / 21%" },
+                  ]}
+                  colorClass="ring-purple-400 text-purple-600 bg-purple-50"
+                />
               ) : (
-                <ToggleAB
-                  mode={introTierMode}
-                  setMode={setIntroTierMode}
-                  labelA="12 / 15 / 18 / 21%"
-                  labelB="21 / 24 / 27 / 30%"
+                <ToggleGroup
+                  mode={introTierModeGrid}
+                  setMode={setIntroTierModeGrid}
+                  options={[
+                    { value: "A", title: "Default", rates: "12 / 15 / 18 / 21%" },
+                    { value: "B", title: "Exclusive", rates: "21 / 24 / 27 / 30%" },
+                  ]}
                   colorClass="ring-purple-400 text-purple-600 bg-purple-50"
                 />
               )}

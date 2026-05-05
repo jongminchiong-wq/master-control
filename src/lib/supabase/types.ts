@@ -69,7 +69,6 @@ export type Database = {
           po_id: string
           ref: string
           supplier_paid: string | null
-          urgency: string | null
         }
         Insert: {
           amount?: number
@@ -83,7 +82,6 @@ export type Database = {
           po_id: string
           ref: string
           supplier_paid?: string | null
-          urgency?: string | null
         }
         Update: {
           amount?: number
@@ -97,7 +95,6 @@ export type Database = {
           po_id?: string
           ref?: string
           supplier_paid?: string | null
-          urgency?: string | null
         }
         Relationships: [
           {
@@ -399,30 +396,215 @@ export type Database = {
         }
         Relationships: []
       }
+      player_commissions: {
+        Row: {
+          amount: number
+          base_amount: number | null
+          created_at: string
+          id: string
+          is_split: boolean
+          player_id: string
+          po_id: string
+          tier_rate: number
+          type: string
+          withdrawal_id: string | null
+        }
+        Insert: {
+          amount: number
+          base_amount?: number | null
+          created_at?: string
+          id?: string
+          is_split?: boolean
+          player_id: string
+          po_id: string
+          tier_rate: number
+          type: string
+          withdrawal_id?: string | null
+        }
+        Update: {
+          amount?: number
+          base_amount?: number | null
+          created_at?: string
+          id?: string
+          is_split?: boolean
+          player_id?: string
+          po_id?: string
+          tier_rate?: number
+          type?: string
+          withdrawal_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "player_commissions_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "player_commissions_po_id_fkey"
+            columns: ["po_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "player_commissions_withdrawal_id_fkey"
+            columns: ["withdrawal_id"]
+            isOneToOne: false
+            referencedRelation: "player_withdrawals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      player_loss_debits: {
+        Row: {
+          amount: number
+          base_amount: number | null
+          cleared_at: string
+          created_at: string
+          id: string
+          introducee_id: string | null
+          player_id: string
+          po_id: string
+          tier_rate: number
+          type: string
+        }
+        Insert: {
+          amount: number
+          base_amount?: number | null
+          cleared_at: string
+          created_at?: string
+          id?: string
+          introducee_id?: string | null
+          player_id: string
+          po_id: string
+          tier_rate: number
+          type: string
+        }
+        Update: {
+          amount?: number
+          base_amount?: number | null
+          cleared_at?: string
+          created_at?: string
+          id?: string
+          introducee_id?: string | null
+          player_id?: string
+          po_id?: string
+          tier_rate?: number
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "player_loss_debits_introducee_id_fkey"
+            columns: ["introducee_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "player_loss_debits_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "player_loss_debits_po_id_fkey"
+            columns: ["po_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      player_withdrawals: {
+        Row: {
+          admin_notes: string | null
+          amount: number
+          created_at: string
+          id: string
+          notes: string | null
+          paid_at: string | null
+          player_id: string
+          requested_at: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+        }
+        Insert: {
+          admin_notes?: string | null
+          amount: number
+          created_at?: string
+          id?: string
+          notes?: string | null
+          paid_at?: string | null
+          player_id: string
+          requested_at?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+        }
+        Update: {
+          admin_notes?: string | null
+          amount?: number
+          created_at?: string
+          id?: string
+          notes?: string | null
+          paid_at?: string | null
+          player_id?: string
+          requested_at?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "player_withdrawals_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "player_withdrawals_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       players: {
         Row: {
           created_at: string | null
-          eu_tier_mode: string | null
+          eu_tier_mode_grid: string
+          eu_tier_mode_proxy: string
           id: string
-          intro_tier_mode: string | null
+          intro_tier_mode_grid: string
+          intro_tier_mode_proxy: string
           introduced_by: string | null
           name: string
           user_id: string | null
         }
         Insert: {
           created_at?: string | null
-          eu_tier_mode?: string | null
+          eu_tier_mode_grid?: string
+          eu_tier_mode_proxy?: string
           id?: string
-          intro_tier_mode?: string | null
+          intro_tier_mode_grid?: string
+          intro_tier_mode_proxy?: string
           introduced_by?: string | null
           name: string
           user_id?: string | null
         }
         Update: {
           created_at?: string | null
-          eu_tier_mode?: string | null
+          eu_tier_mode_grid?: string
+          eu_tier_mode_proxy?: string
           id?: string
-          intro_tier_mode?: string | null
+          intro_tier_mode_grid?: string
+          intro_tier_mode_proxy?: string
           introduced_by?: string | null
           name?: string
           user_id?: string | null
@@ -449,8 +631,12 @@ export type Database = {
           channel: string
           commissions_cleared: string | null
           created_at: string | null
+          description: string | null
           end_user_id: string
           id: string
+          note: string | null
+          other_cost: number
+          other_cost_reason: string | null
           po_amount: number
           po_date: string
           ref: string
@@ -459,8 +645,12 @@ export type Database = {
           channel: string
           commissions_cleared?: string | null
           created_at?: string | null
+          description?: string | null
           end_user_id: string
           id?: string
+          note?: string | null
+          other_cost?: number
+          other_cost_reason?: string | null
           po_amount?: number
           po_date: string
           ref: string
@@ -469,8 +659,12 @@ export type Database = {
           channel?: string
           commissions_cleared?: string | null
           created_at?: string | null
+          description?: string | null
           end_user_id?: string
           id?: string
+          note?: string | null
+          other_cost?: number
+          other_cost_reason?: string | null
           po_amount?: number
           po_date?: string
           ref?: string
@@ -735,6 +929,10 @@ export type Database = {
         }
         Returns: Json
       }
+      approve_player_withdrawal: {
+        Args: { p_admin_notes?: string; p_withdrawal_id: string }
+        Returns: Json
+      }
       approve_withdrawal: {
         Args: { p_admin_notes?: string; p_withdrawal_id: string }
         Returns: Json
@@ -762,8 +960,37 @@ export type Database = {
         }
         Returns: Json
       }
+      credit_player_commission: {
+        Args: {
+          p_amount: number
+          p_base_amount?: number
+          p_credit_date?: string
+          p_player_id: string
+          p_po_id: string
+          p_tier_rate: number
+          p_type: string
+        }
+        Returns: Json
+      }
+      credit_player_loss_debit: {
+        Args: {
+          p_amount: number
+          p_base_amount?: number
+          p_cleared_at?: string
+          p_introducee_id?: string
+          p_player_id: string
+          p_po_id: string
+          p_tier_rate: number
+          p_type: string
+        }
+        Returns: Json
+      }
       get_my_player_ids: { Args: never; Returns: string[] }
       get_my_recruit_ids: { Args: never; Returns: string[] }
+      mark_player_withdrawal_paid: {
+        Args: { p_admin_notes?: string; p_withdrawal_id: string }
+        Returns: Json
+      }
       record_deposit: {
         Args: {
           p_amount: number
@@ -779,6 +1006,10 @@ export type Database = {
         Args: { p_admin_notes?: string; p_request_id: string }
         Returns: Json
       }
+      reject_player_withdrawal: {
+        Args: { p_admin_notes?: string; p_withdrawal_id: string }
+        Returns: Json
+      }
       reject_withdrawal: {
         Args: { p_admin_notes?: string; p_withdrawal_id: string }
         Returns: Json
@@ -791,6 +1022,10 @@ export type Database = {
           p_notes?: string
           p_reference?: string
         }
+        Returns: Json
+      }
+      submit_player_withdrawal: {
+        Args: { p_amount: number; p_notes?: string; p_player_id: string }
         Returns: Json
       }
       submit_withdrawal: {
@@ -929,9 +1164,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-
-// LedgerRow: the v_investor_ledger view row, used by the admin Investors
-// page and the investor Wallet page for capital history tables. Keep this
-// export when re-running `supabase gen types` so those pages keep compiling.
-
-export type LedgerRow = Database["public"]["Views"]["v_investor_ledger"]["Row"]

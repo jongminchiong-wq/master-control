@@ -5,7 +5,7 @@ import { type NextRequest, NextResponse } from "next/server"
 const ADMIN_PATHS = ["/players", "/po-cycle", "/investors", "/entity", "/simulation"]
 
 // Routes that belong to the (player) route group
-const PLAYER_PATHS = ["/dashboard", "/simulator"]
+const PLAYER_PATHS = ["/dashboard", "/simulator", "/withdrawals", "/my-pos", "/introducer-commission"]
 
 // Routes that belong to the (investor) route group
 const INVESTOR_PATHS = ["/portfolio", "/returns"]

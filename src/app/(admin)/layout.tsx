@@ -11,7 +11,6 @@ import {
   Inbox,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
-import { Footer } from "@/components/footer";
 
 const navItems = [
   { href: "/players", label: "Players", icon: Users },
@@ -36,7 +35,6 @@ export default function AdminLayout({
       <Suspense><Sidebar navItems={navItems} footerNavItems={footerNavItems} /></Suspense>
       <main className="flex flex-1 flex-col overflow-auto bg-gray-50 p-6">
         {children}
-        <Footer />
       </main>
     </div>
   );

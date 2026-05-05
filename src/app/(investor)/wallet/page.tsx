@@ -42,9 +42,12 @@ import {
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
-  Wallet as WalletIcon,
   Clock,
+  Coins,
+  Droplets,
+  Lock,
   TrendingDown,
+  type LucideIcon,
 } from "lucide-react";
 
 // ── Types ───────────────────────────────────────────────────
@@ -571,18 +574,21 @@ function WalletPageContent() {
           value={capital}
           hint={`${tier.name} tier · ${tier.rate}%`}
           color="brand"
+          icon={Coins}
         />
         <BalanceCard
           label="Idle"
           value={rawIdle}
           hint="Withdrawable"
           color="amber"
+          icon={Droplets}
         />
         <BalanceCard
           label="Deployed"
           value={deployed}
           hint="Locked in live POs"
           color="brand"
+          icon={Lock}
         />
       </div>
 
@@ -959,11 +965,13 @@ function BalanceCard({
   value,
   hint,
   color,
+  icon: Icon,
 }: {
   label: string;
   value: number;
   hint?: string;
   color: BalanceColor;
+  icon: LucideIcon;
 }) {
   const colorMap: Record<BalanceColor, string> = {
     brand: "text-brand-600",
@@ -988,7 +996,7 @@ function BalanceCard({
             iconBg[color]
           )}
         >
-          <WalletIcon className="size-3.5" strokeWidth={1.6} />
+          <Icon className="size-3.5" strokeWidth={1.6} />
         </div>
         <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
           {label}

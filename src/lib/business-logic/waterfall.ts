@@ -11,7 +11,6 @@ import { getMonth } from "./formatters";
 export interface DeliveryOrder {
   amount: number;
   delivery?: string;
-  urgency?: string;
 }
 
 export interface PurchaseOrder {
@@ -21,6 +20,7 @@ export interface PurchaseOrder {
   poDate: string;
   channel: string;
   dos?: DeliveryOrder[];
+  otherCost?: number;
 }
 
 export interface Player extends PlayerForTier {
@@ -49,7 +49,15 @@ export interface WaterfallResult {
   supplierTotal: number;
   riskAdjustedCogs: number;
   effectiveCogsPct: number;
+  otherCost: number;
   monthlyCumulative: number;
+  // Loss distribution — nonzero when the pool is negative. Covers raw cost
+  // overrun, risk buffer overflow, and unfunded fees alike. Mirrors the
+  // profit split using the same EU + intro tier rates.
+  rawLoss: number;
+  playerLossShare: number;
+  introducerLossShare: number;
+  entityLossShare: number;
 }
 
 // ── The waterfall ───────────────────────────────────────────
@@ -70,15 +78,31 @@ export const calcPOWaterfall = (
   const channel = po.channel || "punchout";
   const poMonth = getMonth(po.poDate);
 
-  // Monthly cumulative PO for this EU (for tier)
+  // Per-channel monthly cumulative PO for this EU (drives the tier band).
+  // Each channel ladders independently: 75k of Proxy POs lifts only the Proxy
+  // tier; 75k of Grid POs lifts only the Grid tier. Cross-channel volume
+  // does not boost the other channel's rate.
   const monthlyCumulative = allPos
     .filter(
-      (p) => p.endUserId === po.endUserId && getMonth(p.poDate) === poMonth
+      (p) =>
+        p.endUserId === po.endUserId &&
+        getMonth(p.poDate) === poMonth &&
+        (p.channel || "punchout") === channel
     )
     .reduce((s, p) => s + (p.poAmount || 0), 0);
 
   // EU tier
-  const euTiers = eu ? getEUTiers(eu, channel) : getEUTiers({ euTierMode: "A", introTierMode: "A" }, "gep");
+  const euTiers = eu
+    ? getEUTiers(eu, channel)
+    : getEUTiers(
+        {
+          euTierModeProxy: "A",
+          euTierModeGrid: "A",
+          introTierModeProxy: "A",
+          introTierModeGrid: "A",
+        },
+        "gep"
+      );
   const euTier = getTier(monthlyCumulative, euTiers);
 
   // Risk-adjusted COGS from DOs
@@ -87,18 +111,15 @@ export const calcPOWaterfall = (
     : 0;
   const riskAdjustedCogs = po.dos
     ? po.dos.reduce((s, d) => {
-        const bp = calcBufferPct(
-          d.amount,
-          d.delivery || "local",
-          d.urgency || "normal"
-        );
+        const bp = calcBufferPct(d.amount, d.delivery || "local");
         return s + d.amount * (1 + bp / 100);
       }, 0)
     : 0;
   const effectiveCogsPct =
     poAmount > 0 ? (riskAdjustedCogs / poAmount) * 100 : 0;
 
-  const gross = poAmount - riskAdjustedCogs;
+  const otherCost = po.otherCost ?? 0;
+  const gross = poAmount - riskAdjustedCogs - otherCost;
   const platformFee = channel === "punchout" ? poAmount * 0.03 : 0;
   const investorFee = deployed * (INV_RATE / 100);
   const pool = gross - platformFee - investorFee;
@@ -127,6 +148,13 @@ export const calcPOWaterfall = (
 
   const entityShare = Math.max(0, entityGross - introAmt);
 
+  // Loss split — full pool deficit, mirroring the profit split.
+  const rawLoss = Math.max(0, -pool);
+  const playerLossShare = rawLoss * (euTier.rate / 100);
+  const sideLoss = rawLoss - playerLossShare;
+  const introducerLossShare = intro ? sideLoss * (introRate / 100) : 0;
+  const entityLossShare = sideLoss - introducerLossShare;
+
   return {
     channel,
     poAmount,
@@ -146,6 +174,11 @@ export const calcPOWaterfall = (
     supplierTotal,
     riskAdjustedCogs,
     effectiveCogsPct,
+    otherCost,
     monthlyCumulative,
+    rawLoss,
+    playerLossShare,
+    introducerLossShare,
+    entityLossShare,
   };
 };
