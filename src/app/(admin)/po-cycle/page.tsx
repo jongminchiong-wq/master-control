@@ -8,7 +8,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import type { Tables } from "@/lib/supabase/types";
+import type { Tables, TablesUpdate } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 // Business logic
@@ -450,10 +450,15 @@ function POCyclePageContent() {
     } else {
       next = value;
     }
-    await supabase
-      .from("purchase_orders")
-      .update({ [field]: next })
-      .eq("id", poId);
+    const update: TablesUpdate<"purchase_orders"> =
+      field === "other_cost"
+        ? { other_cost: next as number }
+        : field === "description"
+          ? { description: next as string | null }
+          : field === "note"
+            ? { note: next as string | null }
+            : { other_cost_reason: next as string | null };
+    await supabase.from("purchase_orders").update(update).eq("id", poId);
     setAllPOs((prev) =>
       prev.map((po) => (po.id === poId ? { ...po, [field]: next } : po)),
     );
