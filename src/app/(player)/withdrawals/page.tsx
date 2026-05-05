@@ -50,6 +50,7 @@ function StatusPill({ status }: { status: string }) {
 }
 
 const MIN_WITHDRAWAL = 100;
+const MIN_BALANCE_RESERVE = 1;
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -190,6 +191,11 @@ export default function PlayerWithdrawalsPage() {
     };
   }, [commissions, lossDebits, withdrawals]);
 
+  const maxWithdrawable = Math.max(
+    0,
+    Math.round(availableTotal) - MIN_BALANCE_RESERVE,
+  );
+
   // Outstanding loss carry — what's still owed after offsetting against
   // unlinked commissions. When commissions ≥ debits the carry is zero;
   // otherwise the difference is what the player must earn back before
@@ -257,8 +263,10 @@ export default function PlayerWithdrawalsPage() {
       setErrorMsg(`Minimum withdrawal is RM ${MIN_WITHDRAWAL}.`);
       return;
     }
-    if (amount > availableTotal + 0.005) {
-      setErrorMsg("Amount exceeds your available balance.");
+    if (amount > maxWithdrawable + 0.005) {
+      setErrorMsg(
+        `Amount exceeds your available balance. RM ${MIN_BALANCE_RESERVE} must remain to keep your account active.`,
+      );
       return;
     }
 
@@ -328,7 +336,7 @@ export default function PlayerWithdrawalsPage() {
       {/* Available balance */}
       <MetricCard
         label="Available"
-        value={fmt(Math.floor(availableTotal))}
+        value={fmt(availableTotal)}
         color="success"
         subtitle={
           lockedAmount > 0
@@ -343,10 +351,11 @@ export default function PlayerWithdrawalsPage() {
       <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <h2 className="text-base font-medium text-gray-900">Request a withdrawal</h2>
 
-        {availableTotal < MIN_WITHDRAWAL ? (
+        {maxWithdrawable < MIN_WITHDRAWAL ? (
           <p className="mt-3 text-sm text-gray-500">
-            You need at least RM {MIN_WITHDRAWAL} cleared to request a
-            withdrawal. Available: {fmt(Math.floor(availableTotal))}.
+            You need at least RM {MIN_WITHDRAWAL + MIN_BALANCE_RESERVE} cleared
+            to request a withdrawal (RM {MIN_BALANCE_RESERVE} is reserved).
+            Available: {fmt(availableTotal)}.
           </p>
         ) : (
           <div className="mt-4 flex flex-col gap-3">
@@ -360,7 +369,7 @@ export default function PlayerWithdrawalsPage() {
                   inputMode="decimal"
                   min={MIN_WITHDRAWAL}
                   step="0.01"
-                  placeholder={String(Math.max(MIN_WITHDRAWAL, Math.floor(availableTotal)))}
+                  placeholder={String(Math.max(MIN_WITHDRAWAL, maxWithdrawable))}
                   value={amountInput}
                   onChange={(e) => setAmountInput(e.target.value)}
                   className="mt-1 font-mono"
@@ -369,7 +378,7 @@ export default function PlayerWithdrawalsPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setAmountInput(String(Math.floor(availableTotal)))}
+                onClick={() => setAmountInput(String(maxWithdrawable))}
               >
                 Max
               </Button>
@@ -381,6 +390,9 @@ export default function PlayerWithdrawalsPage() {
                 {submitting ? "Submitting…" : "Submit request"}
               </Button>
             </div>
+            <p className="text-xs text-gray-500">
+              RM {MIN_BALANCE_RESERVE} minimum balance is required to keep your account active.
+            </p>
             {errorMsg && (
               <p className="text-sm text-danger-700">{errorMsg}</p>
             )}

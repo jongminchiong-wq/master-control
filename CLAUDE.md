@@ -23,7 +23,7 @@ All commands run from `master-control/`:
 - `npm run start` — serve the production build (after `npm run build`)
 - `npm run lint` — eslint
 - `npm run lint 2>&1 | grep <file>` — filter; pre-existing `react-hooks/set-state-in-effect` warnings exist in several pages. Ignore unless your change introduces a new one.
-- `npx tsc --noEmit 2>&1 | grep <file>` — filter; pre-existing errors: missing `LedgerRow` export from `supabase/types`, `.ts` import extensions in `business-logic/__tests__/*`, dynamic-key `.update({ [field]: value })` at `app/(admin)/po-cycle/page.tsx:449`.
+- `npx tsc --noEmit 2>&1 | grep <file>` — filter; only pre-existing errors are `.ts` import extensions in `business-logic/__tests__/*` (test files run via `tsx`, outside the `next build` graph). Treat anything else as a regression — Vercel `next build` runs full tsc and will block deploy.
 - `npx tsx src/lib/business-logic/__tests__/<file>.ts` — run a business-logic test directly (no Jest configured). Available test files: `waterfall.test.ts`, `funding-status.test.ts`, `capital-events.test.ts`, `introducer-credits.test.ts`, `deployment.test.ts`, `reconciliation.ts`.
 - `npx tsx --env-file=.env.local src/lib/business-logic/__tests__/reconciliation.ts` — reconciliation reads live Supabase; needs the env-file flag or it errors with "Missing NEXT_PUBLIC_SUPABASE_URL"
 - `npx supabase gen types typescript --project-id <id> > src/lib/supabase/types.ts` — regenerate DB types after schema changes
@@ -81,8 +81,9 @@ The admin simulator (`app/(admin)/simulation/page.tsx`) and player simulator (`a
 - Migrations: `src/lib/supabase/migrations/` (apply via Supabase CLI or dashboard)
 - Seed data: `src/lib/supabase/seed.sql`
 - Generated types: `src/lib/supabase/types.ts` — never hand-edit
+- Hand-rolled type aliases (e.g. view rows like `LedgerRow` from `v_investor_ledger`) live in `src/lib/supabase/types-helpers.ts` so they survive `supabase gen types` regen. Three pages import `LedgerRow` from there: `(admin)/investors`, `(investor)/portfolio`, `(investor)/wallet`.
 - Row-Level Security on every table; admin = full CRUD, player/investor = read own data only
-- Supabase's generated types reject dynamic-key updates: `update({ [field]: value })` triggers `RejectExcessProperties` (TS2345 "type 'string' is not assignable to type 'never'"). Build a typed update object via an explicit switch instead. Example workaround in `app/(admin)/players/page.tsx` `handleQuickTierUpdate`.
+- Supabase's generated types reject dynamic-key updates: `update({ [field]: value })` triggers `RejectExcessProperties` (TS2345 "type 'string' is not assignable to type 'never'"). Build a typed `TablesUpdate<"...">` object via an explicit switch on the field literal. Example workarounds: `app/(admin)/players/page.tsx` `handleQuickTierUpdate` and `app/(admin)/po-cycle/page.tsx` `handleUpdatePOMeta`.
 
 ## UI stack notes
 
