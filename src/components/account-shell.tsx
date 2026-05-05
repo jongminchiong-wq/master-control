@@ -1,0 +1,95 @@
+"use client";
+
+import { Suspense, useEffect, useState } from "react";
+import {
+  ArrowDownToLine,
+  Building2,
+  Calculator,
+  Home,
+  Inbox,
+  Package,
+  RefreshCcw,
+  Users,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
+import { Sidebar } from "@/components/sidebar";
+import { Header } from "@/components/header";
+import { Footer } from "@/components/footer";
+import { createClient } from "@/lib/supabase/client";
+
+type Role = "admin" | "player" | "investor";
+
+type NavItem = { href: string; label: string; icon: LucideIcon };
+
+const ADMIN_NAV: NavItem[] = [
+  { href: "/players", label: "Players", icon: Users },
+  { href: "/po-cycle", label: "PO Cycle", icon: RefreshCcw },
+  { href: "/investors", label: "Investors", icon: Wallet },
+  { href: "/approvals", label: "Approvals", icon: Inbox },
+  { href: "/entity", label: "Entity", icon: Building2 },
+  { href: "/simulation", label: "Simulation", icon: Calculator },
+];
+
+const PLAYER_NAV: NavItem[] = [
+  { href: "/dashboard", label: "Home", icon: Home },
+  { href: "/my-pos", label: "My PO", icon: Package },
+  { href: "/introducer-commission", label: "Introducer Commission", icon: Users },
+  { href: "/withdrawals", label: "Withdrawals", icon: ArrowDownToLine },
+  { href: "/simulator", label: "Simulator", icon: Calculator },
+];
+
+const INVESTOR_NAV: NavItem[] = [
+  { href: "/portfolio", label: "Home", icon: Home },
+  { href: "/wallet", label: "Wallet", icon: Wallet },
+  { href: "/returns", label: "Simulator", icon: Calculator },
+];
+
+function navForRole(role: Role | null): NavItem[] {
+  if (role === "admin") return ADMIN_NAV;
+  if (role === "investor") return INVESTOR_NAV;
+  if (role === "player") return PLAYER_NAV;
+  return [];
+}
+
+export function AccountShell({ children }: { children: React.ReactNode }) {
+  const [role, setRole] = useState<Role | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: row } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+      if (cancelled) return;
+      setRole((row?.role as Role | undefined) ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div className="flex h-screen">
+      <Suspense>
+        <Sidebar navItems={navForRole(role)} />
+      </Suspense>
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <Header hideUserBadge />
+        <main className="flex flex-1 flex-col overflow-auto bg-gray-50 px-6 pb-6 pt-6">
+          <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col">
+            {children}
+            {role !== "admin" && <Footer />}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}

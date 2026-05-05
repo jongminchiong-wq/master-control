@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -47,9 +48,12 @@ export function UserBadge({ iconOnly = false }: UserBadgeProps) {
   if (!profile?.name) return null;
 
   return (
-    <div className="group/tip relative">
+    <Link
+      href="/profile"
+      aria-label={`${profile.name} — open profile`}
+      className="group/tip relative inline-flex items-center rounded-lg hover:bg-gray-100"
+    >
       <div
-        aria-label={profile.name}
         className={cn(
           "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-gray-800",
           iconOnly && "justify-center px-0"
@@ -70,6 +74,6 @@ export function UserBadge({ iconOnly = false }: UserBadgeProps) {
           {profile.name}
         </span>
       )}
-    </div>
+    </Link>
   );
 }

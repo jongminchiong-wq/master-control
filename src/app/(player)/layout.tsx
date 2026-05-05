@@ -4,7 +4,6 @@ import { Suspense } from "react";
 import {
   Home,
   Calculator,
-  Shield,
   ArrowDownToLine,
   Package,
   Users,
@@ -22,10 +21,6 @@ const navItems = [
   { href: "/simulator", label: "Simulator", icon: Calculator },
 ];
 
-const footerNavItems = [
-  { href: "/security", label: "Security", icon: Shield },
-];
-
 export default function PlayerLayout({
   children,
 }: {
@@ -33,7 +28,7 @@ export default function PlayerLayout({
 }) {
   return (
     <div className="flex h-screen">
-      <Suspense><Sidebar navItems={navItems} footerNavItems={footerNavItems} /></Suspense>
+      <Suspense><Sidebar navItems={navItems} /></Suspense>
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
         <main className="flex flex-1 flex-col overflow-auto bg-gray-50 px-6 pb-6 pt-6">

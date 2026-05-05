@@ -7,7 +7,6 @@ import { createClient } from "@/lib/supabase/client";
 import { SecurityPanel } from "@/components/security-panel";
 
 export default function SecurityPage() {
-  const [backHref, setBackHref] = useState("/");
   const [isMandatory, setIsMandatory] = useState(false);
   const [enrolled, setEnrolled] = useState(false);
 
@@ -22,9 +21,6 @@ export default function SecurityPage() {
         .eq("id", user.id)
         .single();
       const role = record?.role;
-      if (role === "admin") setBackHref("/players");
-      else if (role === "investor") setBackHref("/portfolio");
-      else setBackHref("/dashboard");
       setIsMandatory(role === "player" || role === "investor");
     })();
   }, []);
@@ -33,28 +29,20 @@ export default function SecurityPage() {
   const canDisable = !isMandatory;
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto flex max-w-xl items-center justify-between px-4 py-3">
-          {showBack ? (
-            <Link
-              href={backHref}
-              className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-800"
-            >
-              <ArrowLeft className="size-4" strokeWidth={1.6} />
-              Back to dashboard
-            </Link>
-          ) : (
-            <span />
-          )}
-        </div>
-      </header>
-      <main className="px-4">
-        <SecurityPanel
-          canDisable={canDisable}
-          onEnrollmentChange={setEnrolled}
-        />
-      </main>
+    <div className="mx-auto w-full max-w-xl">
+      {showBack && (
+        <Link
+          href="/profile"
+          className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-800"
+        >
+          <ArrowLeft className="size-4" strokeWidth={1.6} />
+          Back to profile
+        </Link>
+      )}
+      <SecurityPanel
+        canDisable={canDisable}
+        onEnrollmentChange={setEnrolled}
+      />
     </div>
   );
 }
