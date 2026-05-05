@@ -4,7 +4,8 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import type { Database, Tables, LedgerRow } from "@/lib/supabase/types";
+import type { Database, Tables } from "@/lib/supabase/types";
+import type { LedgerRow } from "@/lib/supabase/types-helpers";
 import { cn } from "@/lib/utils";
 
 // Business logic

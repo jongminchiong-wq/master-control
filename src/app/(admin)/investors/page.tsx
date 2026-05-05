@@ -3,7 +3,8 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Check, X, Banknote, ArrowDownCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import type { Tables, LedgerRow } from "@/lib/supabase/types";
+import type { Tables } from "@/lib/supabase/types";
+import type { LedgerRow } from "@/lib/supabase/types-helpers";
 import { cn } from "@/lib/utils";
 
 // Business logic

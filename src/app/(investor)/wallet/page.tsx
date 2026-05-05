@@ -3,7 +3,8 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import type { Tables, LedgerRow } from "@/lib/supabase/types";
+import type { Tables } from "@/lib/supabase/types";
+import type { LedgerRow } from "@/lib/supabase/types-helpers";
 import { cn } from "@/lib/utils";
 
 // Business logic
