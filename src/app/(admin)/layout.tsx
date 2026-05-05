@@ -11,6 +11,7 @@ import {
   Inbox,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
+import { Header } from "@/components/header";
 
 const navItems = [
   { href: "/players", label: "Players", icon: Users },
@@ -33,9 +34,12 @@ export default function AdminLayout({
   return (
     <div className="flex h-screen">
       <Suspense><Sidebar navItems={navItems} footerNavItems={footerNavItems} /></Suspense>
-      <main className="flex flex-1 flex-col overflow-auto bg-gray-50 p-6">
-        {children}
-      </main>
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <Header />
+        <main className="flex-1 overflow-auto bg-gray-50 p-6">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

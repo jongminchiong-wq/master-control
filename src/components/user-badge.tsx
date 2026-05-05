@@ -1,13 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { User } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
 type UserBadgeProps = {
   iconOnly?: boolean;
 };
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 export function UserBadge({ iconOnly = false }: UserBadgeProps) {
   const [profile, setProfile] = useState<{ name: string } | null>(null);
@@ -49,8 +55,12 @@ export function UserBadge({ iconOnly = false }: UserBadgeProps) {
           iconOnly && "justify-center px-0"
         )}
       >
-        <User className="size-4 shrink-0 text-gray-400" strokeWidth={1.5} />
-        {!iconOnly && <span className="truncate">{profile.name}</span>}
+        <span
+          aria-hidden
+          className="flex size-6 shrink-0 items-center justify-center rounded-full bg-brand-50 text-[11px] font-semibold text-brand-600"
+        >
+          {getInitials(profile.name)}
+        </span>
       </div>
       {iconOnly && (
         <span
