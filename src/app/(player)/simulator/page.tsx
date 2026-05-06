@@ -114,7 +114,6 @@ export default function PlayerSimulatorPage() {
   // ── Introducer tier + commission ────────────────────────────
 
   const totalRecruitPO = numRecruits * avgRecruitPO;
-  const totalGroupPO = monthlyPO + totalRecruitPO;
 
   const introTiers: Tier[] =
     channel === "punchout"
@@ -124,7 +123,7 @@ export default function PlayerSimulatorPage() {
       : introTierModeGrid === "B"
         ? GEP_INTRO_B
         : PO_INTRO_B;
-  const introTier = getTier(totalGroupPO, introTiers);
+  const introTier = getTier(totalRecruitPO, introTiers);
   const introTierIdx = introTiers.findIndex(
     (t) => t.name === introTier.name
   );
@@ -133,7 +132,7 @@ export default function PlayerSimulatorPage() {
       ? introTiers[introTierIdx + 1]
       : null;
   const introRemaining = nextIntroTier
-    ? Math.max(0, nextIntroTier.min - totalGroupPO)
+    ? Math.max(0, nextIntroTier.min - totalRecruitPO)
     : 0;
 
   // Per-recruit waterfall
@@ -228,10 +227,10 @@ export default function PlayerSimulatorPage() {
         </div>
       </div>
 
-      {/* ── My Business ─────────────────────────────────────── */}
+      {/* ── My PO ───────────────────────────────────────────── */}
       <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <p className="mb-4 text-xs font-medium uppercase tracking-wide text-brand-600">
-          My Business
+          My PO
         </p>
 
         <div className="space-y-6">
@@ -374,10 +373,7 @@ export default function PlayerSimulatorPage() {
                   <span className="font-medium text-purple-600">
                     {fmt(totalRecruitPO)}
                   </span>{" "}
-                  recruit PO &middot; group{" "}
-                  <span className="font-medium text-purple-600">
-                    {fmt(totalGroupPO)}
-                  </span>
+                  recruit PO
                 </p>
               </div>
 
