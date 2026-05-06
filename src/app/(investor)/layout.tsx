@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense } from "react";
-import { Home, Calculator, Wallet } from "lucide-react";
+import { Home, Wallet } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
@@ -9,7 +9,6 @@ import { Footer } from "@/components/footer";
 const navItems = [
   { href: "/portfolio", label: "Home", icon: Home },
   { href: "/wallet", label: "Wallet", icon: Wallet },
-  { href: "/returns", label: "Simulator", icon: Calculator },
 ];
 
 export default function InvestorLayout({

@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ChevronRight, Shield } from "lucide-react";
+import { ArrowLeft, Calculator, ChevronRight, Shield } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { LogoutButton } from "@/components/logout-button";
 
 export default function ProfilePage() {
   const [name, setName] = useState<string | null>(null);
   const [backHref, setBackHref] = useState("/");
+  const [simulatorHref, setSimulatorHref] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -29,9 +30,16 @@ export default function ProfilePage() {
       if (cancelled) return;
       setName(row?.name ?? "");
       const role = row?.role;
-      if (role === "admin") setBackHref("/players");
-      else if (role === "investor") setBackHref("/portfolio");
-      else setBackHref("/dashboard");
+      if (role === "admin") {
+        setBackHref("/players");
+        setSimulatorHref(null);
+      } else if (role === "investor") {
+        setBackHref("/portfolio");
+        setSimulatorHref("/returns");
+      } else {
+        setBackHref("/dashboard");
+        setSimulatorHref("/simulator");
+      }
     }
 
     load();
@@ -57,6 +65,16 @@ export default function ProfilePage() {
       </h1>
 
       <div className="mt-6 divide-y divide-gray-200 rounded-xl bg-white shadow-sm ring-1 ring-gray-200">
+        {simulatorHref && (
+          <Link
+            href={simulatorHref}
+            className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <Calculator className="size-4 text-gray-400" strokeWidth={1.5} />
+            <span className="flex-1">Simulator</span>
+            <ChevronRight className="size-4 text-gray-400" strokeWidth={1.5} />
+          </Link>
+        )}
         <Link
           href="/security"
           className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"

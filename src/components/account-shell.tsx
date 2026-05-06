@@ -36,13 +36,11 @@ const PLAYER_NAV: NavItem[] = [
   { href: "/my-pos", label: "My PO", icon: Package },
   { href: "/introducer-commission", label: "Introducer Commission", icon: Users },
   { href: "/withdrawals", label: "Withdrawals", icon: ArrowDownToLine },
-  { href: "/simulator", label: "Simulator", icon: Calculator },
 ];
 
 const INVESTOR_NAV: NavItem[] = [
   { href: "/portfolio", label: "Home", icon: Home },
   { href: "/wallet", label: "Wallet", icon: Wallet },
-  { href: "/returns", label: "Simulator", icon: Calculator },
 ];
 
 function navForRole(role: Role | null): NavItem[] {

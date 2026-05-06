@@ -3,7 +3,6 @@
 import { Suspense } from "react";
 import {
   Home,
-  Calculator,
   ArrowDownToLine,
   Package,
   Users,
@@ -18,7 +17,6 @@ const navItems = [
   { href: "/my-pos", label: "My PO", icon: Package },
   { href: "/introducer-commission", label: "Introducer Commission", icon: Users },
   { href: "/withdrawals", label: "Withdrawals", icon: ArrowDownToLine },
-  { href: "/simulator", label: "Simulator", icon: Calculator },
 ];
 
 export default function PlayerLayout({
