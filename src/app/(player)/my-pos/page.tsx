@@ -69,39 +69,58 @@ function ChannelPOCard({
   const tierColor = channel === "gep" ? "brand" : "accent";
   const refColor = channel === "gep" ? "text-brand-600" : "text-accent-600";
 
+  const tierIdx = tiers.findIndex((t) => t.name === tier.name);
+  const nextTier = tierIdx < tiers.length - 1 ? tiers[tierIdx + 1] : null;
+  const remaining = nextTier ? Math.max(0, nextTier.min - total) : 0;
+
+  const [tierOpen, setTierOpen] = useState(false);
+
+  const handlePOClick = (id: string | null) => {
+    setTierOpen(false);
+    setExpandedPOId(id);
+  };
+
   return (
     <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-      <div className="mb-4 flex items-center gap-2">
-        <ChannelBadge channel={channel} />
-        <span className="text-xs text-gray-500">Tier Progress</span>
-      </div>
-
-      <TierCard
-        tier={tier}
-        tiers={tiers}
-        volume={total}
-        color={tierColor}
-        label="of pool"
-      />
-
-      <div className="mt-6 mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-gray-100 pt-4 font-mono text-xs text-gray-500">
-        <span className="font-medium text-gray-800">{fmt(total)}</span>
-        <span className="text-gray-400">·</span>
-        <span className="font-medium text-gray-700">
-          {data.length} PO{data.length !== 1 ? "s" : ""}
-        </span>
-        {euComm !== 0 && (
-          <>
-            <span className="text-gray-400">·</span>
-            <span
-              className={cn(
-                "font-medium",
-                euComm < 0 ? "text-danger-600" : "text-brand-600"
-              )}
-            >
-              {fmtSigned(euComm)} commission
+      <div className="mb-4">
+        <button
+          type="button"
+          aria-expanded={tierOpen}
+          onClick={() => setTierOpen((v) => !v)}
+          className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-gray-50"
+        >
+          <ChannelBadge channel={channel} />
+          <span className={cn("text-sm font-medium", refColor)}>
+            {tier.name}
+          </span>
+          {nextTier ? (
+            <span className="ml-auto font-mono text-xs text-gray-500">
+              <span className="font-medium text-gray-700">
+                {fmt(remaining)}
+              </span>{" "}
+              to {nextTier.name}
             </span>
-          </>
+          ) : (
+            <span className="ml-auto text-xs text-gray-500">Max tier</span>
+          )}
+          <ChevronDown
+            className={cn(
+              "size-4 text-gray-400 transition-transform",
+              tierOpen && "rotate-180"
+            )}
+          />
+        </button>
+
+        {tierOpen && (
+          <div className="mt-4 border-t border-gray-100 pt-4">
+            <TierCard
+              tier={tier}
+              tiers={tiers}
+              volume={total}
+              color={tierColor}
+              label="of pool"
+            />
+          </div>
         )}
       </div>
 
@@ -132,7 +151,7 @@ function ChannelPOCard({
                     "cursor-pointer",
                     isExpanded && "bg-brand-50/30"
                   )}
-                  onClick={() => setExpandedPOId(isExpanded ? null : po.id)}
+                  onClick={() => handlePOClick(isExpanded ? null : po.id)}
                 >
                   <TableCell className="w-6 pr-0">
                     {isExpanded ? (
