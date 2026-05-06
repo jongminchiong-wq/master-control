@@ -56,6 +56,8 @@ function ChannelPOCard({
   tiers,
   expandedPOId,
   setExpandedPOId,
+  tierOpen,
+  onTierToggle,
 }: {
   channel: "punchout" | "gep";
   data: POData[];
@@ -65,6 +67,8 @@ function ChannelPOCard({
   tiers: Tier[];
   expandedPOId: string | null;
   setExpandedPOId: (id: string | null) => void;
+  tierOpen: boolean;
+  onTierToggle: () => void;
 }) {
   const tierColor = channel === "gep" ? "brand" : "accent";
   const refColor = channel === "gep" ? "text-brand-600" : "text-accent-600";
@@ -73,20 +77,13 @@ function ChannelPOCard({
   const nextTier = tierIdx < tiers.length - 1 ? tiers[tierIdx + 1] : null;
   const remaining = nextTier ? Math.max(0, nextTier.min - total) : 0;
 
-  const [tierOpen, setTierOpen] = useState(false);
-
-  const handlePOClick = (id: string | null) => {
-    setTierOpen(false);
-    setExpandedPOId(id);
-  };
-
   return (
     <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
       <div className="mb-4">
         <button
           type="button"
           aria-expanded={tierOpen}
-          onClick={() => setTierOpen((v) => !v)}
+          onClick={onTierToggle}
           className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-gray-50"
         >
           <ChannelBadge channel={channel} />
@@ -151,7 +148,7 @@ function ChannelPOCard({
                     "cursor-pointer",
                     isExpanded && "bg-brand-50/30"
                   )}
-                  onClick={() => handlePOClick(isExpanded ? null : po.id)}
+                  onClick={() => setExpandedPOId(isExpanded ? null : po.id)}
                 >
                   <TableCell className="w-6 pr-0">
                     {isExpanded ? (
@@ -327,6 +324,18 @@ export default function PlayerMyPOsPage() {
   >(null);
 
   const [expandedPOId, setExpandedPOId] = useState<string | null>(null);
+  const [openTier, setOpenTier] = useState<"punchout" | "gep" | null>(null);
+
+  const openPO = (id: string | null) => {
+    setExpandedPOId(id);
+    if (id) setOpenTier(null);
+  };
+
+  const toggleTier = (channel: "punchout" | "gep") => {
+    const isOpening = openTier !== channel;
+    setOpenTier(isOpening ? channel : null);
+    if (isOpening) setExpandedPOId(null);
+  };
 
   const now = new Date();
   const currentMonth =
@@ -563,7 +572,9 @@ export default function PlayerMyPOsPage() {
               tier={punchTier}
               tiers={punchTiers}
               expandedPOId={expandedPOId}
-              setExpandedPOId={setExpandedPOId}
+              setExpandedPOId={openPO}
+              tierOpen={openTier === "punchout"}
+              onTierToggle={() => toggleTier("punchout")}
             />
           )}
           {gepTotal > 0 && (
@@ -575,7 +586,9 @@ export default function PlayerMyPOsPage() {
               tier={gepTier}
               tiers={gepTiers}
               expandedPOId={expandedPOId}
-              setExpandedPOId={setExpandedPOId}
+              setExpandedPOId={openPO}
+              tierOpen={openTier === "gep"}
+              onTierToggle={() => toggleTier("gep")}
             />
           )}
         </div>
