@@ -5,14 +5,10 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
 import { calcPOWaterfall } from "@/lib/business-logic/waterfall";
-import { getTier, getEUTiers } from "@/lib/business-logic/tiers";
-import { PO_EU_C } from "@/lib/business-logic/constants";
 import { fmt, fmtSigned, getMonth } from "@/lib/business-logic/formatters";
 import { getCommissionStatus } from "@/lib/business-logic/commission-status";
 
 import { MetricCard } from "@/components/metric-card";
-import { TierCard } from "@/components/tier-card";
-import { ChannelBadge } from "@/components/channel-badge";
 import { MonthPicker } from "@/components/month-picker";
 
 import {
@@ -174,32 +170,6 @@ export default function PlayerDashboardPage() {
 
   const pendingEUComm = myEUComm - clearedEUComm;
 
-  const gepPOs = useMemo(
-    () => myMonthPOs.filter((po) => po.channel === "gep"),
-    [myMonthPOs]
-  );
-  const punchPOs = useMemo(
-    () => myMonthPOs.filter((po) => po.channel === "punchout"),
-    [myMonthPOs]
-  );
-
-  const gepTotal = gepPOs.reduce((s, po) => s + po.po_amount, 0);
-  const punchTotal = punchPOs.reduce((s, po) => s + po.po_amount, 0);
-
-  const tierModes = myPlayer
-    ? {
-        euTierModeProxy: myPlayer.eu_tier_mode_proxy,
-        euTierModeGrid: myPlayer.eu_tier_mode_grid,
-        introTierModeProxy: myPlayer.intro_tier_mode_proxy,
-        introTierModeGrid: myPlayer.intro_tier_mode_grid,
-      }
-    : null;
-  const gepTiers = tierModes ? getEUTiers(tierModes, "gep") : PO_EU_C;
-  const punchTiers = tierModes ? getEUTiers(tierModes, "punchout") : PO_EU_C;
-
-  const gepTier = getTier(gepTotal, gepTiers);
-  const punchTier = getTier(punchTotal, punchTiers);
-
   const recruits = useMemo(() => {
     if (!myPlayer) return [];
     return allPlayers.filter((p) => p.introduced_by === myPlayer.id);
@@ -354,35 +324,94 @@ export default function PlayerDashboardPage() {
       )}
 
       <div className="px-1 pt-2 pb-1">
-        <p className="text-sm text-gray-500">Total Earnings</p>
+        <p className="text-sm text-gray-500">Lifetime Earnings</p>
         <p className="mt-2 font-mono text-3xl font-semibold tracking-tight text-gray-900">
           {fmtSigned(lifetimeEarned)}
         </p>
-        {(lifetimePending > 0 || myTotalPO > 0) && (
-          <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            {lifetimePending > 0 ? (
-              <p className="font-mono text-sm font-medium text-amber-700">
-                + {fmt(lifetimePending)} pending
-              </p>
-            ) : (
-              <span />
-            )}
-            {myTotalPO > 0 && (
-              <p className="font-mono text-xs text-gray-500">
-                This month{" "}
-                <span className="font-medium text-gray-700">
-                  {fmtSigned(totalComm)}
+        {lifetimeEarned > 0 && (
+          <>
+            <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              {lifetimePending > 0 ? (
+                <p className="font-mono text-sm font-medium text-amber-700">
+                  + {fmt(lifetimePending)} pending lifetime
+                </p>
+              ) : (
+                <span />
+              )}
+              {myAllTimePOs.length > 0 && (
+                <p className="font-mono text-xs text-gray-500">
+                  <span className="font-medium text-gray-700">
+                    {myAllTimePOs.length}
+                  </span>
+                  <span className="text-gray-400">
+                    {" "}
+                    PO{myAllTimePOs.length !== 1 ? "s" : ""} lifetime
+                  </span>
+                </p>
+              )}
+            </div>
+
+            <div className="mt-6">
+              <div className="mb-2 flex items-baseline justify-between">
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Lifetime status
                 </span>
-                <span className="text-gray-400">
-                  {" · "}
-                  {fmt(myTotalPO)} across {myMonthPOs.length} PO
-                  {myMonthPOs.length !== 1 ? "s" : ""}
+                <span className="font-mono text-xs font-medium text-success-600">
+                  {Math.round(
+                    ((lifetimeEarned - lifetimePending) / lifetimeEarned) * 100
+                  )}
+                  % cleared
                 </span>
-              </p>
-            )}
-          </div>
+              </div>
+              <div className="flex h-2 gap-0.5 overflow-hidden rounded-md bg-gray-100">
+                <div
+                  className="rounded-md bg-success-200 transition-all"
+                  style={{
+                    width: `${
+                      ((lifetimeEarned - lifetimePending) / lifetimeEarned) *
+                      100
+                    }%`,
+                  }}
+                />
+                {lifetimePending > 0 && (
+                  <div
+                    className="rounded-md bg-amber-200"
+                    style={{
+                      width: `${(lifetimePending / lifetimeEarned) * 100}%`,
+                    }}
+                  />
+                )}
+              </div>
+              <div className="mt-2 flex gap-5 text-xs">
+                <span className="text-success-600">
+                  Cleared lifetime {fmt(lifetimeEarned - lifetimePending)}
+                </span>
+                {lifetimePending > 0 && (
+                  <span className="text-amber-600">
+                    Pending lifetime {fmt(lifetimePending)}
+                  </span>
+                )}
+              </div>
+            </div>
+          </>
         )}
       </div>
+
+      {myTotalPO > 0 && (
+        <>
+          <MetricCard
+            label="This Month Earnings"
+            value={fmtSigned(totalComm)}
+            color={totalComm < 0 ? "danger" : "brand"}
+          />
+          <MetricCard
+            label="Total PO This Month"
+            value={fmt(myTotalPO)}
+            subtitle={`across ${myMonthPOs.length} PO${myMonthPOs.length !== 1 ? "s" : ""}`}
+            color="accent"
+          />
+        </>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <MetricCard
@@ -425,50 +454,6 @@ export default function PlayerDashboardPage() {
         </MetricCard>
       </div>
 
-      <div
-        className={cn(
-          "grid gap-4",
-          punchTotal > 0 && gepTotal > 0 ? "grid-cols-2" : "grid-cols-1"
-        )}
-      >
-        {punchTotal > 0 && (
-          <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-            <div className="mb-4 flex items-center gap-2">
-              <ChannelBadge channel="punchout" />
-              <span className="text-xs text-gray-500">Tier Progress</span>
-            </div>
-            <TierCard
-              tier={punchTier}
-              tiers={punchTiers}
-              volume={punchTotal}
-              color="accent"
-              label="of pool"
-            />
-          </div>
-        )}
-        {gepTotal > 0 && (
-          <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-            <div className="mb-4 flex items-center gap-2">
-              <ChannelBadge channel="gep" />
-              <span className="text-xs text-gray-500">Tier Progress</span>
-            </div>
-            <TierCard
-              tier={gepTier}
-              tiers={gepTiers}
-              volume={gepTotal}
-              color="brand"
-              label="of pool"
-            />
-          </div>
-        )}
-        {punchTotal === 0 && gepTotal === 0 && (
-          <div className="rounded-2xl bg-white p-8 text-center shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-            <p className="text-xs text-gray-500">
-              No POs this month. Your tier will show once you have POs.
-            </p>
-          </div>
-        )}
-      </div>
     </div>
   );
 }
