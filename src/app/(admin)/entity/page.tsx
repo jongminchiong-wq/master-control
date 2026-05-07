@@ -905,7 +905,7 @@ function EntityPageContent() {
                   </td>
                 </tr>
                 {[
-                  { label: "- Proxy Platform Fee", val: cashPlatformFee },
+                  { label: "- P Platform Fee", val: cashPlatformFee },
                   { label: "- Player Commissions", val: cashPlayerComm },
                   {
                     label: "- Player Introducer Commissions",

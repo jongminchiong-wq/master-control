@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tier display — Option 1 vs Option 2 mockup</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['"DM Sans"', "system-ui", "sans-serif"],
+              mono: ['"IBM Plex Mono"', "monospace"],
+            },
+            colors: {
+              brand: {
+                50: "#f0fdfa",
+                100: "#ccfbf1",
+                400: "#2dd4bf",
+                500: "#14b8a6",
+                600: "#0d9488",
+              },
+              purple: {
+                50: "#faf5ff",
+                100: "#f3e8ff",
+                400: "#a78bfa",
+                500: "#8b5cf6",
+                600: "#7c3aed",
+              },
+              accent: {
+                50: "#eff6ff",
+                100: "#dbeafe",
+                400: "#60a5fa",
+                500: "#3b82f6",
+                600: "#2563eb",
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      body {
+        font-family:
+          "DM Sans",
+          system-ui,
+          sans-serif;
+      }
+      .font-mono,
+      .mono {
+        font-family: "IBM Plex Mono", monospace;
+      }
+    </style>
+  </head>
+
+  <body class="bg-gray-50 text-gray-800">
+    <div class="mx-auto max-w-5xl space-y-12 px-6 py-10">
+      <!-- Page header -->
+      <header class="space-y-1">
+        <p class="text-xs font-medium uppercase tracking-wide text-gray-500">
+          Mockup
+        </p>
+        <h1 class="text-2xl font-semibold text-gray-900">
+          Tier display — Option 1 vs Option 2
+        </h1>
+        <p class="max-w-2xl text-sm text-gray-500">
+          Player A · Proxy channel · COGS 80% · Monthly PO RM 100,000 · 1 recruit
+          @ RM 100,000 → Group PO RM 200,000. Numbers match the live simulator
+          after the recent disjoint-brackets change.
+        </p>
+      </header>
+
+      <!-- ════════════════════════════════════════════════════════
+           OPTION 1 — Annotated progress bar
+           ════════════════════════════════════════════════════════ -->
+      <section class="space-y-4">
+        <div class="flex items-baseline gap-3">
+          <span
+            class="rounded-full bg-brand-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-brand-600"
+            >Option 1</span
+          >
+          <h2 class="text-lg font-semibold text-gray-900">
+            Annotated progress bar
+          </h2>
+          <p class="text-xs text-gray-500">
+            Add a volume row beneath the rate markers. One file change.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <!-- Player commission card -->
+          <div
+            class="space-y-4 rounded-lg border border-brand-100 bg-white p-5"
+          >
+            <div class="rounded-lg border border-brand-100 bg-gray-50 px-5 py-4">
+              <p
+                class="text-xs font-medium uppercase tracking-wide text-brand-600"
+              >
+                My player commission
+              </p>
+              <p class="mono mt-1 text-xl font-medium text-brand-600">
+                RM 3,240
+              </p>
+              <p class="mt-0.5 text-xs text-gray-500">Active · 27% of pool</p>
+            </div>
+
+            <div class="space-y-3">
+              <div>
+                <p class="text-base font-medium text-brand-600">Active</p>
+                <p class="mono text-xs text-gray-500">27% of pool</p>
+              </div>
+
+              <!-- Progress bar -->
+              <div class="flex gap-1">
+                <div class="h-1.5 flex-1 rounded-full bg-brand-400"></div>
+                <div class="h-1.5 flex-1 rounded-full bg-brand-400"></div>
+                <div class="h-1.5 flex-1 rounded-full bg-gray-200"></div>
+                <div class="h-1.5 flex-1 rounded-full bg-gray-200"></div>
+              </div>
+
+              <!-- Rate row (existing) -->
+              <div
+                class="mono flex justify-between text-[10px] text-gray-500"
+              >
+                <span>24%</span><span>27%</span><span>30%</span><span>33%</span>
+              </div>
+
+              <!-- NEW: volume row -->
+              <div
+                class="mono flex justify-between text-[10px] text-gray-400"
+              >
+                <span>0–75,000</span><span>75,001–150,000</span
+                ><span>150,001–250,000</span><span>250,001+</span>
+              </div>
+
+              <p class="text-center text-xs text-gray-500">
+                <span class="mono font-medium text-brand-600">RM 50,000</span>
+                more to reach Performer (30%)
+              </p>
+            </div>
+          </div>
+
+          <!-- Introducer commission card -->
+          <div
+            class="space-y-4 rounded-lg border border-purple-100 bg-white p-5"
+          >
+            <p class="text-xs text-gray-500">
+              Group PO (mine + recruits):
+              <span class="mono font-medium text-purple-600">RM 200,000</span>
+            </p>
+
+            <div
+              class="rounded-lg border border-purple-100 bg-gray-50 px-5 py-4"
+            >
+              <p
+                class="text-xs font-medium uppercase tracking-wide text-purple-600"
+              >
+                My introducer commission
+              </p>
+              <p class="mono mt-1 text-xl font-medium text-purple-600">
+                RM 1,314
+              </p>
+              <p class="mt-0.5 text-xs text-gray-500">
+                15% of entity's share × 1 recruit
+              </p>
+            </div>
+
+            <div class="space-y-3">
+              <div>
+                <p class="text-base font-medium text-purple-600">Active</p>
+                <p class="mono text-xs text-gray-500">15% of entity's share</p>
+              </div>
+
+              <!-- Progress bar -->
+              <div class="flex gap-1">
+                <div class="h-1.5 flex-1 rounded-full bg-purple-400"></div>
+                <div class="h-1.5 flex-1 rounded-full bg-purple-400"></div>
+                <div class="h-1.5 flex-1 rounded-full bg-gray-200"></div>
+                <div class="h-1.5 flex-1 rounded-full bg-gray-200"></div>
+              </div>
+
+              <!-- Rate row -->
+              <div
+                class="mono flex justify-between text-[10px] text-gray-500"
+              >
+                <span>12%</span><span>15%</span><span>18%</span><span>21%</span>
+              </div>
+
+              <!-- NEW: volume row -->
+              <div
+                class="mono flex justify-between text-[10px] text-gray-400"
+              >
+                <span>0–100,000</span><span>100,001–200,000</span
+                ><span>200,001–400,000</span><span>400,001+</span>
+              </div>
+
+              <p class="text-center text-xs text-gray-500">
+                <span class="mono font-medium text-purple-600">RM 200,000</span>
+                more to reach Pro (18%)
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <details class="rounded-lg border border-gray-200 bg-white p-4">
+          <summary
+            class="cursor-pointer text-sm font-medium text-gray-700"
+          >
+            Notes on Option 1
+          </summary>
+          <ul class="mt-3 space-y-1.5 text-sm text-gray-600">
+            <li>+ One file changed (<code>tier-card.tsx</code>); both cards inherit it.</li>
+            <li>+ Stays in the existing visual language; minimal training cost.</li>
+            <li>− Three lines under a thin bar gets dense on narrow viewports.</li>
+            <li>− Volume strings ("151–250K") longer than rates ("30%") — needs short labels like ≤75K to avoid clipping.</li>
+          </ul>
+        </details>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════════
+           OPTION 2 — Compact tier table
+           ════════════════════════════════════════════════════════ -->
+      <section class="space-y-4">
+        <div class="flex items-baseline gap-3">
+          <span
+            class="rounded-full bg-purple-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-purple-600"
+            >Option 2</span
+          >
+          <h2 class="text-lg font-semibold text-gray-900">
+            Compact tier table
+          </h2>
+          <p class="text-xs text-gray-500">
+            4-row table with the active tier highlighted. Replaces the progress
+            bar.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <!-- Player commission card -->
+          <div
+            class="space-y-4 rounded-lg border border-brand-100 bg-white p-5"
+          >
+            <div class="rounded-lg border border-brand-100 bg-gray-50 px-5 py-4">
+              <p
+                class="text-xs font-medium uppercase tracking-wide text-brand-600"
+              >
+                My player commission
+              </p>
+              <p class="mono mt-1 text-xl font-medium text-brand-600">
+                RM 3,240
+              </p>
+              <p class="mt-0.5 text-xs text-gray-500">Active · 27% of pool</p>
+            </div>
+
+            <!-- Tier table -->
+            <div class="overflow-hidden rounded-lg border border-gray-200">
+              <div
+                class="grid grid-cols-[1.2fr_1.5fr_0.6fr] bg-gray-50 px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-gray-500"
+              >
+                <span>Tier</span>
+                <span>Monthly PO</span>
+                <span class="text-right">Rate</span>
+              </div>
+
+              <div class="divide-y divide-gray-100 text-sm">
+                <!-- Base -->
+                <div
+                  class="grid grid-cols-[1.2fr_1.5fr_0.6fr] items-center px-3 py-2.5 text-gray-600"
+                >
+                  <span>Base</span>
+                  <span class="mono text-xs text-gray-500">RM 0 – 75,000</span>
+                  <span class="mono text-right">24%</span>
+                </div>
+                <!-- Active (current) -->
+                <div
+                  class="grid grid-cols-[1.2fr_1.5fr_0.6fr] items-center bg-brand-50 px-3 py-2.5"
+                >
+                  <span class="flex items-center gap-2 font-medium text-brand-600">
+                    <span class="size-1.5 rounded-full bg-brand-500"></span>
+                    Active
+                  </span>
+                  <span class="mono text-xs text-gray-700"
+                    >RM 75,001 – 150,000</span
+                  >
+                  <span class="mono text-right font-medium text-brand-600"
+                    >27%</span
+                  >
+                </div>
+                <!-- Performer -->
+                <div
+                  class="grid grid-cols-[1.2fr_1.5fr_0.6fr] items-center px-3 py-2.5 text-gray-600"
+                >
+                  <span>Performer</span>
+                  <span class="mono text-xs text-gray-500"
+                    >RM 150,001 – 250,000</span
+                  >
+                  <span class="mono text-right">30%</span>
+                </div>
+                <!-- Top -->
+                <div
+                  class="grid grid-cols-[1.2fr_1.5fr_0.6fr] items-center px-3 py-2.5 text-gray-600"
+                >
+                  <span>Top</span>
+                  <span class="mono text-xs text-gray-500">RM 250,001+</span>
+                  <span class="mono text-right">33%</span>
+                </div>
+              </div>
+            </div>
+
+            <p class="text-center text-xs text-gray-500">
+              <span class="mono font-medium text-brand-600">RM 50,000</span>
+              more to reach Performer (30%)
+            </p>
+          </div>
+
+          <!-- Introducer commission card -->
+          <div
+            class="space-y-4 rounded-lg border border-purple-100 bg-white p-5"
+          >
+            <p class="text-xs text-gray-500">
+              Group PO (mine + recruits):
+              <span class="mono font-medium text-purple-600">RM 200,000</span>
+            </p>
+
+            <div
+              class="rounded-lg border border-purple-100 bg-gray-50 px-5 py-4"
+            >
+              <p
+                class="text-xs font-medium uppercase tracking-wide text-purple-600"
+              >
+                My introducer commission
+              </p>
+              <p class="mono mt-1 text-xl font-medium text-purple-600">
+                RM 1,314
+              </p>
+              <p class="mt-0.5 text-xs text-gray-500">
+                15% of entity's share × 1 recruit
+              </p>
+            </div>
+
+            <!-- Tier table -->
+            <div class="overflow-hidden rounded-lg border border-gray-200">
+              <div
+                class="grid grid-cols-[1.2fr_1.5fr_0.6fr] bg-gray-50 px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-gray-500"
+              >
+                <span>Tier</span>
+                <span>Group PO</span>
+                <span class="text-right">Rate</span>
+              </div>
+
+              <div class="divide-y divide-gray-100 text-sm">
+                <!-- Base -->
+                <div
+                  class="grid grid-cols-[1.2fr_1.5fr_0.6fr] items-center px-3 py-2.5 text-gray-600"
+                >
+                  <span>Base</span>
+                  <span class="mono text-xs text-gray-500"
+                    >RM 0 – 100,000</span
+                  >
+                  <span class="mono text-right">12%</span>
+                </div>
+                <!-- Active (current) -->
+                <div
+                  class="grid grid-cols-[1.2fr_1.5fr_0.6fr] items-center bg-purple-50 px-3 py-2.5"
+                >
+                  <span class="flex items-center gap-2 font-medium text-purple-600">
+                    <span class="size-1.5 rounded-full bg-purple-500"></span>
+                    Active
+                  </span>
+                  <span class="mono text-xs text-gray-700"
+                    >RM 100,001 – 200,000</span
+                  >
+                  <span class="mono text-right font-medium text-purple-600"
+                    >15%</span
+                  >
+                </div>
+                <!-- Pro -->
+                <div
+                  class="grid grid-cols-[1.2fr_1.5fr_0.6fr] items-center px-3 py-2.5 text-gray-600"
+                >
+                  <span>Pro</span>
+                  <span class="mono text-xs text-gray-500"
+                    >RM 200,001 – 400,000</span
+                  >
+                  <span class="mono text-right">18%</span>
+                </div>
+                <!-- Elite -->
+                <div
+                  class="grid grid-cols-[1.2fr_1.5fr_0.6fr] items-center px-3 py-2.5 text-gray-600"
+                >
+                  <span>Elite</span>
+                  <span class="mono text-xs text-gray-500">RM 400,001+</span>
+                  <span class="mono text-right">21%</span>
+                </div>
+              </div>
+            </div>
+
+            <p class="text-center text-xs text-gray-500">
+              <span class="mono font-medium text-purple-600">RM 200,000</span>
+              more to reach Pro (18%)
+            </p>
+          </div>
+        </div>
+
+        <details class="rounded-lg border border-gray-200 bg-white p-4">
+          <summary
+            class="cursor-pointer text-sm font-medium text-gray-700"
+          >
+            Notes on Option 2
+          </summary>
+          <ul class="mt-3 space-y-1.5 text-sm text-gray-600">
+            <li>+ Most readable for non-technical players: tier name, RM range, and rate side-by-side.</li>
+            <li>+ Naturally extends to a fourth column "Earn at this tier" if you want to show projected earnings per row.</li>
+            <li>+ Same component used for both Player and Introducer cards (table is generic).</li>
+            <li>− Roughly doubles the card height vs. the progress-bar version.</li>
+            <li>− Some redundancy: the active tier appears in the headline AND the table.</li>
+          </ul>
+        </details>
+      </section>
+
+      <!-- Footer -->
+      <footer class="border-t border-gray-200 pt-6 text-xs text-gray-400">
+        Mockup only — values reflect Player A on Proxy channel after the
+        disjoint-brackets change. Open this file in any browser; uses Tailwind
+        via CDN.
+      </footer>
+    </div>
+  </body>
+</html>

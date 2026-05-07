@@ -11,6 +11,7 @@ interface TierCardProps {
   className?: string;
   variant?: "bar" | "table";
   volumeLabel?: string;
+  showHeader?: boolean;
 }
 
 const activeColorMap = {
@@ -55,6 +56,7 @@ export function TierCard({
   className,
   variant = "bar",
   volumeLabel = "Volume",
+  showHeader = true,
 }: TierCardProps) {
   const tierIdx = tiers.findIndex((t) => t.name === tier.name);
   const nextTier = tierIdx < tiers.length - 1 ? tiers[tierIdx + 1] : null;
@@ -62,17 +64,18 @@ export function TierCard({
 
   return (
     <div className={cn("space-y-3", className)}>
-      {/* Tier name and rate */}
-      <div className="flex items-center gap-3">
-        <div>
-          <p className={cn("text-base font-medium", textColorMap[color])}>
-            {tier.name}
-          </p>
-          <p className="font-mono text-xs text-gray-500">
-            {tier.rate}% {label}
-          </p>
+      {showHeader && (
+        <div className="flex items-center gap-3">
+          <div>
+            <p className={cn("text-base font-medium", textColorMap[color])}>
+              {tier.name}
+            </p>
+            <p className="font-mono text-xs text-gray-500">
+              {tier.rate}% {label}
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {variant === "table" ? (
         <div className="overflow-hidden rounded-lg border border-gray-200">

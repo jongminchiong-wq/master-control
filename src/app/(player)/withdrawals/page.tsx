@@ -307,7 +307,7 @@ export default function PlayerWithdrawalsPage() {
   return (
     <div className="flex flex-col gap-6 py-6">
       <div>
-        <h1 className="text-xl font-medium text-gray-900">Withdrawals</h1>
+        <p className="text-sm text-gray-500">Withdrawals</p>
         <p className="mt-1 text-sm text-gray-500">
           Withdraw your cleared commission. Minimum RM {MIN_WITHDRAWAL} per
           request.

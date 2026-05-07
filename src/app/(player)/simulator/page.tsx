@@ -36,6 +36,7 @@ const PUNCHOUT_EU_TABLES: Record<EUProxyMode, Tier[]> = {
 // Shared components
 import { MetricCard } from "@/components/metric-card";
 import { Slider } from "@/components/ui/slider";
+import { TierCard } from "@/components/tier-card";
 
 export default function PlayerSimulatorPage() {
   const supabase = useMemo(() => createClient(), []);
@@ -97,12 +98,6 @@ export default function PlayerSimulatorPage() {
         : PO_EU_C
       : PUNCHOUT_EU_TABLES[euTierModeProxy];
   const euTier = getTier(monthlyPO, euTiers);
-  const euTierIdx = euTiers.findIndex((t) => t.name === euTier.name);
-  const nextEUTier =
-    euTierIdx < euTiers.length - 1 ? euTiers[euTierIdx + 1] : null;
-  const euRemaining = nextEUTier
-    ? Math.max(0, nextEUTier.min - monthlyPO)
-    : 0;
 
   const cogs = monthlyPO * (cogsPercent / 100);
   const gross = monthlyPO - cogs;
@@ -124,16 +119,6 @@ export default function PlayerSimulatorPage() {
         ? GEP_INTRO_B
         : PO_INTRO_B;
   const introTier = getTier(totalRecruitPO, introTiers);
-  const introTierIdx = introTiers.findIndex(
-    (t) => t.name === introTier.name
-  );
-  const nextIntroTier =
-    introTierIdx < introTiers.length - 1
-      ? introTiers[introTierIdx + 1]
-      : null;
-  const introRemaining = nextIntroTier
-    ? Math.max(0, nextIntroTier.min - totalRecruitPO)
-    : 0;
 
   // Per-recruit waterfall
   const recruitTier = getTier(avgRecruitPO, euTiers);
@@ -154,6 +139,9 @@ export default function PlayerSimulatorPage() {
 
   return (
     <div className="space-y-5">
+      <div className="px-1 pt-2 pb-1">
+        <p className="text-sm text-gray-500">Simulator</p>
+      </div>
       <MetricCard
         label="Total estimated monthly earnings"
         value={fmt(totalMonthly)}
@@ -240,8 +228,8 @@ export default function PlayerSimulatorPage() {
             <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5 text-xs">
               {(
                 [
-                  { id: "punchout", label: "Proxy", color: "accent" },
-                  { id: "gep", label: "Grid", color: "brand" },
+                  { id: "punchout", label: "P", color: "accent" },
+                  { id: "gep", label: "G", color: "brand" },
                 ] as const
               ).map((ch) => (
                 <button
@@ -284,38 +272,16 @@ export default function PlayerSimulatorPage() {
               <span>RM 300K</span>
             </div>
 
-            {/* EU tier pills */}
-            <div className="flex flex-wrap gap-2 pt-1">
-              {euTiers.map((t, i) => {
-                const active = i === euTierIdx;
-                return (
-                  <span
-                    key={t.name}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs",
-                      active
-                        ? "border border-brand-600 bg-brand-50 font-medium text-brand-600"
-                        : "border border-gray-200 text-gray-500"
-                    )}
-                  >
-                    {t.name} &middot; {t.rate}%
-                  </span>
-                );
-              })}
-            </div>
-
-            {nextEUTier ? (
-              <p className="text-xs text-gray-500">
-                <span className="font-mono font-medium text-gray-600">
-                  {fmt(euRemaining)}
-                </span>{" "}
-                more to reach {nextEUTier.name} ({nextEUTier.rate}%)
-              </p>
-            ) : (
-              <p className="text-xs font-medium text-brand-600">
-                Max tier reached
-              </p>
-            )}
+            <TierCard
+              tier={euTier}
+              tiers={euTiers}
+              volume={monthlyPO}
+              color="brand"
+              variant="table"
+              volumeLabel="Monthly PO"
+              showHeader={false}
+              className="pt-1"
+            />
           </div>
 
         </div>
@@ -377,38 +343,15 @@ export default function PlayerSimulatorPage() {
                 </p>
               </div>
 
-              {/* Intro tier pills */}
-              <div className="flex flex-wrap gap-2">
-                {introTiers.map((t, i) => {
-                  const active = i === introTierIdx;
-                  return (
-                    <span
-                      key={t.name}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs",
-                        active
-                          ? "border border-purple-600 bg-purple-50 font-medium text-purple-600"
-                          : "border border-gray-200 text-gray-500"
-                      )}
-                    >
-                      {t.name} &middot; {t.rate}%
-                    </span>
-                  );
-                })}
-              </div>
-
-              {nextIntroTier ? (
-                <p className="text-xs text-gray-500">
-                  <span className="font-mono font-medium text-gray-600">
-                    {fmt(introRemaining)}
-                  </span>{" "}
-                  more to reach {nextIntroTier.name} ({nextIntroTier.rate}%)
-                </p>
-              ) : (
-                <p className="text-xs font-medium text-purple-600">
-                  Max tier reached
-                </p>
-              )}
+              <TierCard
+                tier={introTier}
+                tiers={introTiers}
+                volume={totalRecruitPO}
+                color="purple"
+                variant="table"
+                volumeLabel="Recruit PO"
+                showHeader={false}
+              />
             </>
           )}
         </div>

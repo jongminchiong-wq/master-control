@@ -16,7 +16,7 @@ export function ChannelBadge({ channel, className }: ChannelBadgeProps) {
         className
       )}
     >
-      {channel === "gep" ? "GRID" : "PROXY"}
+      {channel === "gep" ? "G" : "P"}
     </span>
   );
 }

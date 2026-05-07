@@ -28,7 +28,7 @@ export default function PlayerLayout({
     <div className="flex h-screen">
       <Suspense><Sidebar navItems={navItems} /></Suspense>
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Header />
+        <Header containerClass="mx-auto max-w-5xl" />
         <main className="flex flex-1 flex-col overflow-auto bg-gray-50 px-6 pb-6 pt-6">
           <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col">
             <PlayerMonthProvider>{children}</PlayerMonthProvider>

@@ -801,8 +801,8 @@ function POCyclePageContent() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all__">All</SelectItem>
-                <SelectItem value="punchout">Proxy</SelectItem>
-                <SelectItem value="gep">Grid</SelectItem>
+                <SelectItem value="punchout">P</SelectItem>
+                <SelectItem value="gep">G</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -971,7 +971,7 @@ function POCyclePageContent() {
                         : "bg-gray-100 text-gray-500 hover:bg-gray-200"
                     )}
                   >
-                    {ch === "gep" ? "Grid" : "Proxy"}
+                    {ch === "gep" ? "G" : "P"}
                   </button>
                 ))}
               </div>
@@ -1831,7 +1831,7 @@ function PORow({
                 <div>
                   <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-gray-500">
                     Commission Breakdown (
-                    {po.channel === "gep" ? "Grid" : "Proxy"}{" "}
+                    {po.channel === "gep" ? "G" : "P"}{" "}
                     Waterfall)
                   </p>
                   <WaterfallTable
@@ -1907,7 +1907,7 @@ function buildWaterfallRows(
 
   if (w.channel === "punchout") {
     rows.push({
-      label: "Proxy Platform (3%)",
+      label: "P Platform (3%)",
       val: -w.platformFee,
       color: "danger",
     });

@@ -103,6 +103,9 @@ export default function InvestorSimulatorPage() {
 
   return (
     <div className="space-y-5">
+      <div className="px-1 pt-2 pb-1">
+        <p className="text-sm text-gray-500">Returns</p>
+      </div>
       {/* ── Summary MetricCards ─────────────────────────────── */}
       <div
         className={cn(

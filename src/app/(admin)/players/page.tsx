@@ -92,13 +92,13 @@ const EU_GRID_LABELS: Record<EUGridMode, string> = {
 };
 
 const INTRO_PROXY_LABELS: Record<IntroMode, string> = {
-  A: "Default (9-18%)",
-  B: "Exclusive (12-21%)",
+  A: "Default (12-21%)",
+  B: "Exclusive (21-30%)",
 };
 
 const INTRO_GRID_LABELS: Record<IntroMode, string> = {
-  A: "Default (12-21%)",
-  B: "Exclusive (21-30%)",
+  A: "Default (21-30%)",
+  B: "Exclusive (27-36%)",
 };
 
 function narrowEUProxy(v: string): EUProxyMode {
@@ -695,7 +695,7 @@ function PlayerFormDialog({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-500">
-                Player Tier (Proxy)
+                Player Tier (P)
               </label>
               <div className="flex flex-col gap-1">
                 {EU_PROXY_MODES.map((opt) => (
@@ -719,7 +719,7 @@ function PlayerFormDialog({
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-500">
-                Player Tier (Grid)
+                Player Tier (G)
               </label>
               <div className="flex flex-col gap-1">
                 {EU_GRID_MODES.map((opt) => (
@@ -743,7 +743,7 @@ function PlayerFormDialog({
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-500">
-                Intro Tier (Proxy)
+                Intro Tier (P)
               </label>
               <div className="flex flex-col gap-1">
                 {INTRO_MODES.map((opt) => (
@@ -770,7 +770,7 @@ function PlayerFormDialog({
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-500">
-                Intro Tier (Grid)
+                Intro Tier (G)
               </label>
               <div className="flex flex-col gap-1">
                 {INTRO_MODES.map((opt) => (
@@ -941,12 +941,12 @@ function PlayerRow({
             <div className="flex flex-col gap-0.5">
               {(stats?.punchTotal ?? 0) > 0 && (
                 <span className="font-mono text-xs font-medium text-accent-600">
-                  Proxy: {punchTier.name} ({punchTier.rate}%)
+                  P: {punchTier.name} ({punchTier.rate}%)
                 </span>
               )}
               {(stats?.gepTotal ?? 0) > 0 && (
                 <span className="font-mono text-xs font-medium text-brand-600">
-                  Grid: {gepTier.name} ({gepTier.rate}%)
+                  G: {gepTier.name} ({gepTier.rate}%)
                 </span>
               )}
             </div>
@@ -1013,7 +1013,7 @@ function PlayerRow({
               <div className="grid grid-cols-2 gap-x-6 gap-y-3">
                 <div>
                   <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-500">
-                    Player Tier (Proxy)
+                    Player Tier (P)
                   </p>
                   <div className="flex gap-1">
                     {EU_PROXY_MODES.map((opt) => (
@@ -1037,7 +1037,7 @@ function PlayerRow({
                 </div>
                 <div>
                   <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-500">
-                    Player Tier (Grid)
+                    Player Tier (G)
                   </p>
                   <div className="flex gap-1">
                     {EU_GRID_MODES.map((opt) => (
@@ -1061,7 +1061,7 @@ function PlayerRow({
                 </div>
                 <div>
                   <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-500">
-                    Intro Tier (Proxy)
+                    Intro Tier (P)
                   </p>
                   <div className="flex gap-1">
                     {INTRO_MODES.map((opt) => (
@@ -1089,7 +1089,7 @@ function PlayerRow({
                 </div>
                 <div>
                   <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-500">
-                    Intro Tier (Grid)
+                    Intro Tier (G)
                   </p>
                   <div className="flex gap-1">
                     {INTRO_MODES.map((opt) => (

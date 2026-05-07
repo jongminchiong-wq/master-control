@@ -5,7 +5,6 @@ import { cn } from "@/lib/utils";
 
 // Business logic
 import {
-  INV_RATE,
   INV_TIERS,
   PO_EU_A,
   PO_EU_A_PLUS,
@@ -42,6 +41,63 @@ import { WaterfallTable } from "@/components/waterfall-table";
 import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
 
+// ── Card chrome (matches MetricCard / player simulator) ────
+
+const CARD =
+  "rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]";
+
+// ── Segmented control (single toggle pattern) ──────────────
+
+type SegOption<T extends string> = {
+  value: T;
+  label: string;
+  sublabel?: string;
+  meta?: string;
+  activeText: string;
+};
+
+function Segmented<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: SegOption<T>[];
+}) {
+  return (
+    <div className="flex rounded-md border border-gray-200 bg-gray-50 p-0.5">
+      {options.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            onClick={() => onChange(opt.value)}
+            className={cn(
+              "flex-1 rounded px-3 py-1.5 text-center transition-colors",
+              active
+                ? `bg-white shadow-sm ${opt.activeText}`
+                : "text-gray-500 hover:text-gray-700"
+            )}
+          >
+            <span className="block text-xs font-medium">{opt.label}</span>
+            {opt.sublabel && (
+              <span className="mt-0.5 block text-[9px] font-normal opacity-70">
+                {opt.sublabel}
+              </span>
+            )}
+            {opt.meta && (
+              <span className="mt-0.5 block text-[9px] font-normal text-gray-500">
+                {opt.meta}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Slider label helper ────────────────────────────────────
 
 function SliderField({
@@ -69,7 +125,7 @@ function SliderField({
 }) {
   return (
     <div className="space-y-2">
-      <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
+      <label className="text-xs font-medium uppercase tracking-wide text-gray-500">
         {label}
       </label>
       <div className="flex items-center justify-between">
@@ -95,43 +151,6 @@ function SliderField({
           {hint}
         </p>
       )}
-    </div>
-  );
-}
-
-// ── Generic tier-mode toggle group ─────────────────────────
-
-function ToggleGroup<T extends string>({
-  mode,
-  setMode,
-  options,
-  colorClass,
-}: {
-  mode: T;
-  setMode: (m: T) => void;
-  options: { value: T; title: string; rates: string }[];
-  colorClass: string;
-}) {
-  const btnClasses = (active: boolean) =>
-    cn(
-      "flex-1 rounded-lg px-2 py-2.5 text-center text-xs font-medium transition-colors",
-      active
-        ? `ring-2 ${colorClass} bg-opacity-5`
-        : "border border-gray-200 text-gray-500 hover:bg-gray-50"
-    );
-
-  return (
-    <div className="flex gap-2">
-      {options.map((opt) => (
-        <button
-          key={opt.value}
-          onClick={() => setMode(opt.value)}
-          className={btnClasses(mode === opt.value)}
-        >
-          <p className="text-xs font-medium">{opt.title}</p>
-          <p className="mt-0.5 text-[9px] opacity-70">{opt.rates}</p>
-        </button>
-      ))}
     </div>
   );
 }
@@ -166,47 +185,6 @@ function PoolSplitBar({
   );
 }
 
-// ── Investor tier selector ─────────────────────────────────
-
-function InvestorTierSelector({
-  selectedIdx,
-  onSelect,
-}: {
-  selectedIdx: number;
-  onSelect: (idx: number) => void;
-}) {
-  return (
-    <div className="flex gap-2">
-      {INV_TIERS.map((t, i) => {
-        const active = i === selectedIdx;
-        return (
-          <button
-            key={t.name}
-            onClick={() => onSelect(i)}
-            className={cn(
-              "flex flex-1 flex-col items-center rounded-lg px-2 py-2.5 text-center transition-colors",
-              active
-                ? "ring-2 ring-success-400 bg-success-50"
-                : "border border-gray-200 text-gray-500 hover:bg-gray-50"
-            )}
-          >
-            <span className="text-xs font-medium">{t.name}</span>
-            <span className="mt-0.5 font-mono text-sm font-medium">
-              {t.rate}%
-            </span>
-            <span className="mt-0.5 text-[9px] text-gray-500">
-              {t.min === 0 ? "<" : ""}RM{" "}
-              {t.max === Infinity
-                ? `${Math.ceil(t.min / 1000)}K+`
-                : `${Math.ceil(t.min / 1000)}K-${t.max / 1000}K`}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 // ── OPEX input row ─────────────────────────────────────────
 
 function OpexInput({
@@ -234,6 +212,15 @@ function OpexInput({
       </div>
     </div>
   );
+}
+
+// ── Format tier range (for segmented control meta) ─────────
+
+function rangeMeta(t: Tier): string {
+  const fromK = Math.ceil(t.min / 1000);
+  if (t.max === Infinity) return `RM ${fromK}K+`;
+  const toK = t.max / 1000;
+  return t.min === 0 ? `< RM ${toK}K` : `RM ${fromK}K-${toK}K`;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -396,76 +383,63 @@ export default function SimulationPage() {
       <div className="grid grid-cols-[340px_1fr] gap-6">
         {/* ═══ LEFT PANEL — Controls ═══ */}
         <div className="space-y-4">
-          {/* Channel toggle */}
-          <div className="space-y-3 rounded-xl bg-white p-5 shadow-sm ring-1 ring-brand-100">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-              Channel
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPunchoutOn(true)}
-                className={cn(
-                  "flex-1 rounded-full py-2.5 text-center text-xs font-medium transition-colors",
-                  punchoutOn
-                    ? "bg-accent-600 text-white"
-                    : "border border-gray-200 text-gray-500 hover:bg-gray-50"
-                )}
-              >
-                Proxy
-              </button>
-              <button
-                onClick={() => setPunchoutOn(false)}
-                className={cn(
-                  "flex-1 rounded-full py-2.5 text-center text-xs font-medium transition-colors",
-                  !punchoutOn
-                    ? "bg-brand-600 text-white"
-                    : "border border-gray-200 text-gray-500 hover:bg-gray-50"
-                )}
-              >
-                Grid
-              </button>
+          {/* Channel + Player tier system */}
+          <div className={cn(CARD, "space-y-6")}>
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                Channel
+              </p>
+              <Segmented
+                value={punchoutOn ? "punchout" : "gep"}
+                onChange={(v) => setPunchoutOn(v === "punchout")}
+                options={[
+                  { value: "punchout", label: "P", activeText: "text-accent-600" },
+                  { value: "gep", label: "G", activeText: "text-brand-600" },
+                ]}
+              />
             </div>
 
-            {/* EU tier mode */}
-            <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-              Player tier system
-            </p>
-            {!punchoutOn ? (
-              <ToggleGroup
-                mode={euTierModeGrid}
-                setMode={setEuTierModeGrid}
-                options={[
-                  { value: "A", title: "Default", rates: "21 / 24 / 27 / 30%" },
-                  { value: "B", title: "Exclusive", rates: "24 / 27 / 30 / 33%" },
-                ]}
-                colorClass="ring-brand-400 text-brand-600 bg-brand-50"
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                Player tier system
+              </p>
+              {!punchoutOn ? (
+                <Segmented
+                  value={euTierModeGrid}
+                  onChange={setEuTierModeGrid}
+                  options={[
+                    { value: "A", label: "Default", sublabel: "21 / 24 / 27 / 30%", activeText: "text-brand-600" },
+                    { value: "B", label: "Exclusive", sublabel: "24 / 27 / 30 / 33%", activeText: "text-brand-600" },
+                  ]}
+                />
+              ) : (
+                <Segmented
+                  value={euTierModeProxy}
+                  onChange={setEuTierModeProxy}
+                  options={[
+                    { value: "A", label: "Default", sublabel: "24 / 27 / 30 / 33%", activeText: "text-brand-600" },
+                    { value: "A_PLUS", label: "Premium", sublabel: "30 / 33 / 36 / 39%", activeText: "text-brand-600" },
+                    { value: "B", label: "Exclusive", sublabel: "33 / 36 / 39 / 42%", activeText: "text-brand-600" },
+                  ]}
+                />
+              )}
+              <TierCard
+                tier={calc.euTier}
+                tiers={calc.EU_TIERS}
+                volume={monthlyPOVol}
+                color="brand"
+                label="of pool"
+                variant="table"
+                volumeLabel="Monthly PO"
+                showHeader={false}
+                className="pt-1"
               />
-            ) : (
-              <ToggleGroup
-                mode={euTierModeProxy}
-                setMode={setEuTierModeProxy}
-                options={[
-                  { value: "A", title: "Default", rates: "24 / 27 / 30 / 33%" },
-                  { value: "A_PLUS", title: "Premium", rates: "30 / 33 / 36 / 39%" },
-                  { value: "B", title: "Exclusive", rates: "33 / 36 / 39 / 42%" },
-                ]}
-                colorClass="ring-brand-400 text-brand-600 bg-brand-50"
-              />
-            )}
-
-            {/* EU tier card */}
-            <TierCard
-              tier={calc.euTier}
-              tiers={calc.EU_TIERS}
-              volume={monthlyPOVol}
-              color="brand"
-              label="of pool"
-            />
+            </div>
           </div>
 
           {/* Deal variables */}
-          <div className="space-y-5 rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-200">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
+          <div className={cn(CARD, "space-y-6")}>
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
               Deal variables
             </p>
 
@@ -493,17 +467,23 @@ export default function SimulationPage() {
               onChange={setCogsPercent}
             />
 
-            {/* Divider */}
             <hr className="border-gray-200" />
 
             {/* Investor tier */}
             <div className="space-y-2">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                 Investor tier (% of PO value)
               </p>
-              <InvestorTierSelector
-                selectedIdx={invTierIdx}
-                onSelect={setInvTierIdx}
+              <Segmented
+                value={String(invTierIdx)}
+                onChange={(v) => setInvTierIdx(Number(v))}
+                options={INV_TIERS.map((t, i) => ({
+                  value: String(i),
+                  label: t.name,
+                  sublabel: `${t.rate}%`,
+                  meta: rangeMeta(t),
+                  activeText: "text-success-600",
+                }))}
               />
               <p className="text-center text-[10px] font-medium text-success-600">
                 Investor earns {fmt(calc.investorFee)}/month ({calc.invRate}%
@@ -514,48 +494,48 @@ export default function SimulationPage() {
             <hr className="border-gray-200" />
 
             {/* End-user network */}
-            <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-              Player network
-            </p>
-            <SliderField
-              label="Number of players"
-              rangeLabel="1 – 10"
-              value={numEndUsers}
-              formatValue={String(numEndUsers)}
-              min={1}
-              max={10}
-              step={1}
-              onChange={setNumEndUsers}
-              hint={`${numEndUsers} x ${fmt(monthlyPOVol)} = ${fmt(calc.totalGroupPO)} total group PO`}
-              accentClass="text-purple-600"
-            />
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                Player network
+              </p>
+              <SliderField
+                label="Number of players"
+                rangeLabel="1 – 10"
+                value={numEndUsers}
+                formatValue={String(numEndUsers)}
+                min={1}
+                max={10}
+                step={1}
+                onChange={setNumEndUsers}
+                hint={`${numEndUsers} x ${fmt(monthlyPOVol)} = ${fmt(calc.totalGroupPO)} total group PO`}
+                accentClass="text-purple-600"
+              />
+            </div>
 
             <hr className="border-gray-200" />
 
             {/* EU introducer tier */}
             <div className="space-y-2">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                 Player introducer tier (auto from group PO)
               </p>
               {punchoutOn ? (
-                <ToggleGroup
-                  mode={introTierModeProxy}
-                  setMode={setIntroTierModeProxy}
+                <Segmented
+                  value={introTierModeProxy}
+                  onChange={setIntroTierModeProxy}
                   options={[
-                    { value: "A", title: "Default", rates: "9 / 12 / 15 / 18%" },
-                    { value: "B", title: "Exclusive", rates: "12 / 15 / 18 / 21%" },
+                    { value: "A", label: "Default", sublabel: "12 / 15 / 18 / 21%", activeText: "text-purple-600" },
+                    { value: "B", label: "Exclusive", sublabel: "21 / 24 / 27 / 30%", activeText: "text-purple-600" },
                   ]}
-                  colorClass="ring-purple-400 text-purple-600 bg-purple-50"
                 />
               ) : (
-                <ToggleGroup
-                  mode={introTierModeGrid}
-                  setMode={setIntroTierModeGrid}
+                <Segmented
+                  value={introTierModeGrid}
+                  onChange={setIntroTierModeGrid}
                   options={[
-                    { value: "A", title: "Default", rates: "12 / 15 / 18 / 21%" },
-                    { value: "B", title: "Exclusive", rates: "21 / 24 / 27 / 30%" },
+                    { value: "A", label: "Default", sublabel: "21 / 24 / 27 / 30%", activeText: "text-purple-600" },
+                    { value: "B", label: "Exclusive", sublabel: "27 / 30 / 33 / 36%", activeText: "text-purple-600" },
                   ]}
-                  colorClass="ring-purple-400 text-purple-600 bg-purple-50"
                 />
               )}
               <TierCard
@@ -564,43 +544,49 @@ export default function SimulationPage() {
                 volume={calc.totalGroupPO}
                 color="purple"
                 label="of entity's share"
+                variant="table"
+                volumeLabel="Group PO"
+                showHeader={false}
+                className="pt-1"
               />
             </div>
 
             <hr className="border-gray-200" />
 
             {/* Investor network */}
-            <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-              Investor network
-            </p>
-            <SliderField
-              label="Number of investors introduced"
-              rangeLabel="1 – 10"
-              value={numInvestors}
-              formatValue={String(numInvestors)}
-              min={1}
-              max={10}
-              step={1}
-              onChange={setNumInvestors}
-            />
-            <SliderField
-              label="Avg capital per investor"
-              rangeLabel="RM 5K – 200K"
-              value={avgInvCapital}
-              formatValue={fmt(avgInvCapital)}
-              min={5000}
-              max={200000}
-              step={5000}
-              onChange={setAvgInvCapital}
-              hint={`${numInvestors} x ${fmt(avgInvCapital)} = ${fmt(calc.totalInvCapital)} total capital`}
-              accentClass="text-amber-600"
-            />
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                Investor network
+              </p>
+              <SliderField
+                label="Number of investors introduced"
+                rangeLabel="1 – 10"
+                value={numInvestors}
+                formatValue={String(numInvestors)}
+                min={1}
+                max={10}
+                step={1}
+                onChange={setNumInvestors}
+              />
+              <SliderField
+                label="Avg capital per investor"
+                rangeLabel="RM 5K – 200K"
+                value={avgInvCapital}
+                formatValue={fmt(avgInvCapital)}
+                min={5000}
+                max={200000}
+                step={5000}
+                onChange={setAvgInvCapital}
+                hint={`${numInvestors} x ${fmt(avgInvCapital)} = ${fmt(calc.totalInvCapital)} total capital`}
+                accentClass="text-amber-600"
+              />
+            </div>
 
             <hr className="border-gray-200" />
 
             {/* Investor introducer tier */}
             <div className="space-y-2">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                 Inv introducer (auto from capital introduced)
               </p>
               <TierCard
@@ -609,6 +595,9 @@ export default function SimulationPage() {
                 volume={calc.totalInvCapital}
                 color="amber"
                 label="of investor return"
+                variant="table"
+                volumeLabel="Capital introduced"
+                showHeader={false}
               />
               <p className="text-center text-[10px] font-medium text-amber-600">
                 Earns {fmt(calc.invIntroAmt)}/month ({calc.invIntroPct}% x{" "}
@@ -627,7 +616,7 @@ export default function SimulationPage() {
 
             {/* OPEX */}
             <div className="space-y-3">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                 Monthly OPEX
               </p>
               <OpexInput
@@ -664,9 +653,17 @@ export default function SimulationPage() {
 
         {/* ═══ RIGHT PANEL — Waterfall Results ═══ */}
         <div className="space-y-4">
+          {/* Hero — Entity net */}
+          <MetricCard
+            label="Entity net (monthly)"
+            value={fmt(calc.entityNet)}
+            subtitle={`After ${calc.monthlyOpex > 0 ? "OPEX & " : ""}both introducers`}
+            color={calc.entityNet < 0 ? "danger" : "success"}
+          />
+
           {/* Monthly waterfall hero */}
-          <div className="space-y-4 rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-200">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
+          <div className={cn(CARD, "space-y-4")}>
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
               Monthly waterfall
             </p>
 
@@ -693,12 +690,12 @@ export default function SimulationPage() {
             {/* Cost deductions */}
             <div className="grid grid-cols-2 gap-3">
               <MetricCard
-                label={`Proxy (3%)`}
+                label={`P (3%)`}
                 value={fmt(calc.punchoutFee)}
                 subtitle={
                   punchoutOn
                     ? `3% x ${fmt(calc.totalGroupPO)} PO`
-                    : "Grid — no platform fee"
+                    : "G — no platform fee"
                 }
                 color={punchoutOn ? "danger" : "default"}
                 className={!punchoutOn ? "opacity-50" : undefined}
@@ -713,7 +710,7 @@ export default function SimulationPage() {
 
             {/* Pool */}
             <MetricCard
-              label={`Pool (Gross${punchoutOn ? " - Proxy" : ""} - Investor)`}
+              label={`Pool (Gross${punchoutOn ? " - P" : ""} - Investor)`}
               value={fmt(calc.pool)}
               subtitle={`Split between player (${calc.endUserRate}%) and entity (${100 - calc.endUserRate}%)`}
               color={calc.pool > 0 ? "accent" : "danger"}
@@ -816,40 +813,10 @@ export default function SimulationPage() {
             )}
           </div>
 
-          {/* Yearly estimate */}
-          {calc.poolHealthy && (
-            <div className="space-y-3 rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-200">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-                Yearly estimate (x12)
-              </p>
-              <div className="grid grid-cols-4 gap-3">
-                <MetricCard
-                  label="Player"
-                  value={fmt(calc.endUserAmt * 12)}
-                  color="brand"
-                />
-                <MetricCard
-                  label="Investor"
-                  value={fmt(calc.investorFee * 12)}
-                  color="success"
-                />
-                <MetricCard
-                  label="Player introducer"
-                  value={fmt(calc.euIntroGross * 12)}
-                  color="purple"
-                />
-                <MetricCard
-                  label="Entity (net)"
-                  value={fmt(calc.entityNet * 12)}
-                  color={calc.entityNet < 0 ? "danger" : "accent"}
-                />
-              </div>
-            </div>
-          )}
-
           {/* Full waterfall table */}
           <WaterfallTable
             title="Cost vs earnings summary (monthly)"
+            className="rounded-2xl p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)] ring-0"
             rows={[
               {
                 label: `Total group PO (${numEndUsers} Player x ${fmt(monthlyPOVol)})`,
@@ -864,13 +831,12 @@ export default function SimulationPage() {
               {
                 label: "= Gross profit",
                 val: calc.grossProfit,
-                color: "success",
                 bold: true,
               },
               ...(punchoutOn
                 ? [
                     {
-                      label: "- Proxy (3% of PO)",
+                      label: "- P (3% of PO)",
                       val: -calc.punchoutFee,
                       color: "danger" as const,
                     },
@@ -884,34 +850,31 @@ export default function SimulationPage() {
               {
                 label: "= Pool (to split)",
                 val: calc.pool,
-                color: "accent",
                 bold: true,
               },
               {
                 label: `- Player (${calc.endUserRate}%)`,
                 val: -calc.endUserAmt,
-                color: "brand" as const,
+                color: "danger" as const,
               },
               {
                 label: "= Entity side",
                 val: calc.entityGross,
-                color: "accent",
                 bold: true,
               },
               {
                 label: `- Player introducer (${calc.introducerPct}%)`,
                 val: -calc.euIntroGross,
-                color: "purple" as const,
+                color: "danger" as const,
               },
               {
                 label: `- Inv introducer (${calc.invIntroPct}% x ${fmt(calc.invActualReturn)})`,
                 val: -calc.invIntroAmt,
-                color: "amber" as const,
+                color: "danger" as const,
               },
               {
                 label: "= Entity before OPEX",
                 val: calc.entityBeforeOpex,
-                color: "accent",
               },
               ...(calc.monthlyOpex > 0
                 ? [
@@ -925,7 +888,7 @@ export default function SimulationPage() {
               {
                 label: "= Entity net",
                 val: calc.entityNet,
-                color: (calc.entityNet < 0 ? "danger" : "accent") as "danger" | "accent",
+                color: calc.entityNet < 0 ? ("danger" as const) : undefined,
                 bold: true,
               },
             ]}
