@@ -32,7 +32,7 @@ export function LogoutButton({ iconOnly = false }: LogoutButtonProps) {
         iconOnly ? "justify-center px-0" : "justify-start"
       )}
     >
-      <LogOut className="size-6 text-gray-400" strokeWidth={1.5} />
+      <LogOut className="size-5 text-gray-400" strokeWidth={1.5} />
       {!iconOnly && (loading ? "Signing out…" : "Sign out")}
     </Button>
   );
