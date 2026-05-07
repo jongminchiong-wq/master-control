@@ -57,7 +57,7 @@ function renderNavItem(
         href={item.href + preservedQuery}
         aria-label={item.label}
         className={cn(
-          "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+          "relative flex items-center gap-5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
           isActive
             ? "bg-brand-50 text-brand-600"
             : "text-gray-500 hover:bg-gray-100 hover:text-gray-700",
@@ -69,7 +69,7 @@ function renderNavItem(
         )}
         <item.icon
           className={cn(
-            "size-4 shrink-0",
+            "size-6 shrink-0",
             isActive ? "text-brand-400" : "text-gray-400"
           )}
           strokeWidth={1.5}
@@ -133,7 +133,7 @@ export function Sidebar({ navItems }: SidebarProps) {
       >
         {!collapsed && (
           <div className="flex items-center pl-3">
-            <Command className="size-4 shrink-0 text-brand-400" strokeWidth={1.6} />
+            <Command className="size-6 shrink-0 text-brand-400" strokeWidth={1.6} />
           </div>
         )}
         <div className={cn("group/tip relative inline-flex", !collapsed && "ml-auto")}>
@@ -146,7 +146,7 @@ export function Sidebar({ navItems }: SidebarProps) {
               collapsed && "w-10 justify-center px-0"
             )}
           >
-            <PanelLeft className="size-4 shrink-0 text-gray-400" strokeWidth={1.5} />
+            <PanelLeft className="size-6 shrink-0 text-gray-400" strokeWidth={1.5} />
           </button>
           <span
             role="tooltip"

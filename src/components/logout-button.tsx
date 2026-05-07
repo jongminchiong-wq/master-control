@@ -28,11 +28,11 @@ export function LogoutButton({ iconOnly = false }: LogoutButtonProps) {
       disabled={loading}
       aria-label="Sign out"
       className={cn(
-        "w-full gap-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700",
+        "w-full gap-5 text-gray-500 hover:bg-gray-100 hover:text-gray-700",
         iconOnly ? "justify-center px-0" : "justify-start"
       )}
     >
-      <LogOut className="size-4 text-gray-400" strokeWidth={1.5} />
+      <LogOut className="size-6 text-gray-400" strokeWidth={1.5} />
       {!iconOnly && (loading ? "Signing out…" : "Sign out")}
     </Button>
   );

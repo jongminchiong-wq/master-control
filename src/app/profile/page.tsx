@@ -54,9 +54,9 @@ export default function ProfilePage() {
     <div className="mx-auto w-full max-w-xl">
       <Link
         href={backHref}
-        className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-800"
+        className="mb-6 inline-flex items-center gap-5 text-sm font-medium text-gray-600 hover:text-gray-800"
       >
-        <ArrowLeft className="size-4" strokeWidth={1.6} />
+        <ArrowLeft className="size-6" strokeWidth={1.6} />
         Back
       </Link>
 
@@ -68,20 +68,20 @@ export default function ProfilePage() {
         {simulatorHref && (
           <Link
             href={simulatorHref}
-            className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="flex items-center gap-5 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            <Calculator className="size-4 text-gray-400" strokeWidth={1.5} />
+            <Calculator className="size-6 text-gray-400" strokeWidth={1.5} />
             <span className="flex-1">Simulator</span>
-            <ChevronRight className="size-4 text-gray-400" strokeWidth={1.5} />
+            <ChevronRight className="size-6 text-gray-400" strokeWidth={1.5} />
           </Link>
         )}
         <Link
           href="/security"
-          className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          className="flex items-center gap-5 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
-          <Shield className="size-4 text-gray-400" strokeWidth={1.5} />
+          <Shield className="size-6 text-gray-400" strokeWidth={1.5} />
           <span className="flex-1">Security</span>
-          <ChevronRight className="size-4 text-gray-400" strokeWidth={1.5} />
+          <ChevronRight className="size-6 text-gray-400" strokeWidth={1.5} />
         </Link>
         <div className="px-2 py-2">
           <LogoutButton />
