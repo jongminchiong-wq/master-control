@@ -66,13 +66,18 @@ export default function InvestorCycleHistoryPage() {
     <div className="space-y-5">
       <div className="px-1 pt-2 pb-1">
         <p className="text-sm text-gray-500">Cycle History</p>
-        <p className="mt-2 font-mono text-3xl font-semibold tracking-tight text-accent-600">
+        <p className="mt-2 font-mono text-3xl font-semibold tracking-tight text-gray-900">
           {fmt(lifetimeReturns)}
         </p>
-        <p className="mt-1 text-xs text-gray-500">
-          Credited to capital &middot; grows forever &middot; at current{" "}
-          {myTier.rate}% tier
-        </p>
+        <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <p className="font-mono text-sm font-medium text-success-600">
+            +{fmt(lifetimeReturns)} earned at {myTier.rate}% tier
+          </p>
+          <p className="font-mono text-xs text-gray-500">
+            Credited to capital
+            <span className="text-gray-400"> · grows forever</span>
+          </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-4">

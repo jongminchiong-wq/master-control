@@ -62,14 +62,25 @@ export default function InvestorDeploymentsPage() {
     <div className="space-y-5">
       <div className="px-1 pt-2 pb-1">
         <p className="text-sm text-gray-500">Deployments</p>
-        <p className="mt-2 font-mono text-3xl font-semibold tracking-tight text-brand-600">
+        <p className="mt-2 font-mono text-3xl font-semibold tracking-tight text-gray-900">
           {fmt(totalDeployed)}
         </p>
-        <p className="mt-1 text-xs text-gray-500">
-          Currently in live POs &middot; {utilisationPct}% utilised &middot;
-          Lifetime {fmt(lifetimeDeployed)} across {myDeployments.length} cycle
-          {myDeployments.length !== 1 ? "s" : ""}
-        </p>
+        <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <p className="font-mono text-sm font-medium text-success-600">
+            {utilisationPct}% utilised in live POs
+          </p>
+          <p className="font-mono text-xs text-gray-500">
+            Lifetime deployed{" "}
+            <span className="font-medium text-gray-700">
+              {fmt(lifetimeDeployed)}
+            </span>
+            <span className="text-gray-400">
+              {" · "}
+              {myDeployments.length} cycle
+              {myDeployments.length !== 1 ? "s" : ""}
+            </span>
+          </p>
+        </div>
       </div>
 
       <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">

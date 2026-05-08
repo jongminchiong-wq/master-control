@@ -188,8 +188,8 @@ export default function InvestorDashboardPage() {
         </button>
       )}
 
-      {/* ═══ TIER PROGRESS (on canvas) ═══ */}
-      <div className="w-full px-1">
+      {/* ═══ TIER PROGRESS ═══ */}
+      <div className="w-full rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-200">
         <div className="mb-4">
           <p className="text-sm font-semibold text-gray-800">Investor Tier</p>
         </div>

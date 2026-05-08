@@ -3,8 +3,8 @@
 import { Suspense } from "react";
 import {
   Home,
-  ArrowDownToLine,
-  Package,
+  Wallet,
+  FileText,
   Users,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
@@ -15,9 +15,9 @@ import { PlayerMonthProvider } from "./_month-context";
 
 const navItems = [
   { href: "/dashboard", label: "Home", icon: Home },
-  { href: "/my-pos", label: "My Purchase Order", icon: Package },
+  { href: "/my-pos", label: "My Purchase Order", icon: FileText },
   { href: "/introducer-commission", label: "Introducer Commission", icon: Users },
-  { href: "/withdrawals", label: "Withdrawals", icon: ArrowDownToLine },
+  { href: "/withdrawals", label: "Withdrawals", icon: Wallet },
 ];
 
 export default function PlayerLayout({
