@@ -141,36 +141,21 @@ export default function PlayerSimulatorPage() {
     <div className="space-y-5">
       <div className="px-1 pt-2 pb-1">
         <p className="text-sm text-gray-500">Simulator</p>
+        <p className="mt-2 font-mono text-3xl font-semibold tracking-tight text-gray-900">
+          {fmt(totalMonthly)}
+        </p>
+        <p className="mt-2 font-mono text-xs text-gray-500">
+          Total estimated monthly earnings
+        </p>
       </div>
-      <MetricCard
-        label="Total estimated monthly earnings"
-        value={fmt(totalMonthly)}
-        color="success"
-      >
-        {numRecruits > 0 && (
-          <div className="mt-1 flex gap-2.5">
-            <span className="text-[10px] font-medium text-brand-600">
-              Player {fmt(euAmt)}
-            </span>
-            <span className="text-[10px] font-medium text-purple-600">
-              Intro {fmt(totalIntroAmt)}
-            </span>
-          </div>
-        )}
-      </MetricCard>
 
       {/* ── Summary MetricCards ─────────────────────────────── */}
       <div
         className={cn(
           "grid gap-4",
-          numRecruits > 0 ? "grid-cols-3" : "grid-cols-2"
+          numRecruits > 0 ? "grid-cols-2" : "grid-cols-1"
         )}
       >
-        <MetricCard
-          label="My monthly PO"
-          value={fmt(monthlyPO)}
-          subtitle={`COGS ${cogsPercent}% · ${fmt(cogs)}`}
-        />
         <MetricCard
           label="Player Commission"
           value={fmt(euAmt)}
@@ -272,16 +257,18 @@ export default function PlayerSimulatorPage() {
               <span>RM 300K</span>
             </div>
 
-            <TierCard
-              tier={euTier}
-              tiers={euTiers}
-              volume={monthlyPO}
-              color="brand"
-              variant="table"
-              volumeLabel="Monthly PO"
-              showHeader={false}
-              className="pt-1"
-            />
+            {monthlyPO > 0 && (
+              <TierCard
+                tier={euTier}
+                tiers={euTiers}
+                volume={monthlyPO}
+                color="brand"
+                variant="table"
+                volumeLabel="Monthly PO"
+                showHeader={false}
+                className="pt-1"
+              />
+            )}
           </div>
 
         </div>

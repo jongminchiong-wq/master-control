@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +11,8 @@ import { getCommissionStatus } from "@/lib/business-logic/commission-status";
 
 import { MetricCard } from "@/components/metric-card";
 import { MonthPicker } from "@/components/month-picker";
+
+import { ArrowRight } from "lucide-react";
 
 import {
   type DBPlayer,
@@ -330,26 +333,17 @@ export default function PlayerDashboardPage() {
         </p>
         {lifetimeEarned > 0 && (
           <>
-            <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-              {lifetimePending > 0 ? (
-                <p className="font-mono text-sm font-medium text-amber-700">
-                  + {fmt(lifetimePending)} pending lifetime
-                </p>
-              ) : (
-                <span />
-              )}
-              {myAllTimePOs.length > 0 && (
-                <p className="font-mono text-xs text-gray-500">
-                  <span className="font-medium text-gray-700">
-                    {myAllTimePOs.length}
-                  </span>
-                  <span className="text-gray-400">
-                    {" "}
-                    PO{myAllTimePOs.length !== 1 ? "s" : ""} lifetime
-                  </span>
-                </p>
-              )}
-            </div>
+            {myAllTimePOs.length > 0 && (
+              <p className="mt-2 font-mono text-xs text-gray-500">
+                <span className="font-medium text-gray-700">
+                  {myAllTimePOs.length}
+                </span>
+                <span className="text-gray-400">
+                  {" "}
+                  PO{myAllTimePOs.length !== 1 ? "s" : ""} lifetime
+                </span>
+              </p>
+            )}
 
             <div className="mt-6">
               <div className="mb-2 flex items-baseline justify-between">
@@ -452,6 +446,31 @@ export default function PlayerDashboardPage() {
             </span>
           </div>
         </MetricCard>
+      </div>
+
+      {/* ═══ SIMULATOR TEASER ═══ */}
+      <div className="rounded-2xl bg-brand-50 px-6 py-5">
+        <p className="text-sm font-semibold text-brand-800">
+          Want to see how much you can earn?
+        </p>
+        <p className="mt-2 text-xs leading-relaxed text-brand-600">
+          There are two ways to earn with us:
+        </p>
+        <ul className="mt-1 ml-4 list-disc space-y-0.5 text-xs leading-relaxed text-brand-600">
+          <li>Bring in your own POs.</li>
+          <li>Or invite other players who bring in POs.</li>
+        </ul>
+        <p className="mt-2 text-xs leading-relaxed text-brand-600">
+          Both ways pay you a commission. Open the simulator to see what
+          each way could pay.
+        </p>
+        <Link
+          href="/simulator"
+          className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 hover:text-brand-800"
+        >
+          Open Simulator
+          <ArrowRight className="size-4" />
+        </Link>
       </div>
 
     </div>

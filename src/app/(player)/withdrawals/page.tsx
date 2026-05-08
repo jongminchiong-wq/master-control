@@ -7,7 +7,6 @@ import { cn } from "@/lib/utils";
 
 import { fmt, fmtMonth, getMonth } from "@/lib/business-logic/formatters";
 
-import { MetricCard } from "@/components/metric-card";
 import { SectionHeader } from "@/components/section-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -306,17 +305,20 @@ export default function PlayerWithdrawalsPage() {
 
   return (
     <div className="flex flex-col gap-6 py-6">
-      <div>
+      <div className="px-1 pt-2 pb-1">
         <p className="text-sm text-gray-500">Withdrawals</p>
-        <p className="mt-1 text-sm text-gray-500">
-          Withdraw your cleared commission. Minimum RM {MIN_WITHDRAWAL} per
-          request.
+        <p className="mt-2 font-mono text-3xl font-semibold tracking-tight text-gray-900">
+          {fmt(availableTotal)}
+        </p>
+        <p className="mt-2 font-mono text-xs text-gray-500">
+          {lockedAmount > 0
+            ? `${fmt(lockedAmount)} locked in pending requests`
+            : debitTotal > 0
+              ? `${fmt(debitTotal)} loss share absorbed`
+              : "Cleared and ready to request"}
         </p>
       </div>
 
-      {/* Loss carry callout — only when there's an active outstanding carry.
-          Once fully offset, the "loss share absorbed" subtitle on the
-          Available card is the only ambient signal the player needs. */}
       {outstandingCarry > 0 && (
         <div className="rounded-lg border border-danger-100 bg-danger-50 p-4">
           <div className="flex items-baseline justify-between">
@@ -332,20 +334,6 @@ export default function PlayerWithdrawalsPage() {
           </p>
         </div>
       )}
-
-      {/* Available balance */}
-      <MetricCard
-        label="Available"
-        value={fmt(availableTotal)}
-        color="success"
-        subtitle={
-          lockedAmount > 0
-            ? `${fmt(lockedAmount)} locked in pending requests`
-            : debitTotal > 0
-              ? `${fmt(debitTotal)} loss share absorbed`
-              : "Cleared and ready to request"
-        }
-      />
 
       {/* Request form */}
       <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">

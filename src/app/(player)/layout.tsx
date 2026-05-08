@@ -14,7 +14,7 @@ import { PlayerMonthProvider } from "./_month-context";
 
 const navItems = [
   { href: "/dashboard", label: "Home", icon: Home },
-  { href: "/my-pos", label: "My PO", icon: Package },
+  { href: "/my-pos", label: "My Purchase Order", icon: Package },
   { href: "/introducer-commission", label: "Introducer Commission", icon: Users },
   { href: "/withdrawals", label: "Withdrawals", icon: ArrowDownToLine },
 ];

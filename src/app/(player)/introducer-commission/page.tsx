@@ -262,7 +262,7 @@ export default function PlayerIntroducerCommissionPage() {
 
       <div className="px-1 pt-2 pb-1">
         <p className="text-sm text-gray-500">Introducer Commission</p>
-        <p className="mt-2 font-mono text-3xl font-semibold tracking-tight text-purple-600">
+        <p className="mt-2 font-mono text-3xl font-semibold tracking-tight text-gray-900">
           {fmtSigned(totalIntroComm)}
         </p>
         <p className="mt-2 font-mono text-xs text-gray-500">
@@ -287,7 +287,7 @@ export default function PlayerIntroducerCommissionPage() {
       </div>
 
       {recruits.length > 0 && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 gap-4">
           <MetricCard
             label="Earned"
             value={fmtSigned(clearedIntroComm)}
@@ -299,12 +299,6 @@ export default function PlayerIntroducerCommissionPage() {
             value={fmt(Math.max(0, pendingIntroComm))}
             color="amber"
             subtitle="Across active POs"
-          />
-          <MetricCard
-            label="Recruits"
-            value={String(recruits.length)}
-            color="purple"
-            subtitle={`${fmt(totalMonthlyPO)} monthly PO`}
           />
         </div>
       )}

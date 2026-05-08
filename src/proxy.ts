@@ -8,7 +8,7 @@ const ADMIN_PATHS = ["/players", "/po-cycle", "/investors", "/entity", "/simulat
 const PLAYER_PATHS = ["/dashboard", "/simulator", "/withdrawals", "/my-pos", "/introducer-commission"]
 
 // Routes that belong to the (investor) route group
-const INVESTOR_PATHS = ["/portfolio", "/returns"]
+const INVESTOR_PATHS = ["/portfolio", "/returns", "/deployments", "/cycle-history", "/network"]
 
 function startsWithAny(pathname: string, prefixes: string[]): boolean {
   return prefixes.some((p) => pathname === p || pathname.startsWith(p + "/"))

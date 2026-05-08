@@ -33,7 +33,7 @@ const ADMIN_NAV: NavItem[] = [
 
 const PLAYER_NAV: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: Home },
-  { href: "/my-pos", label: "My PO", icon: Package },
+  { href: "/my-pos", label: "My Purchase Order", icon: Package },
   { href: "/introducer-commission", label: "Introducer Commission", icon: Users },
   { href: "/withdrawals", label: "Withdrawals", icon: ArrowDownToLine },
 ];
