@@ -1,9 +1,11 @@
 import { AccountShell } from "@/components/account-shell";
+import { getRoleServer } from "@/lib/auth/get-role-server";
 
-export default function SecurityLayout({
+export default async function SecurityLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <AccountShell>{children}</AccountShell>;
+  const initialRole = await getRoleServer();
+  return <AccountShell initialRole={initialRole}>{children}</AccountShell>;
 }
