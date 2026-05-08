@@ -350,7 +350,7 @@ export default function PlayerDashboardPage() {
                 <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
                   Lifetime status
                 </span>
-                <span className="font-mono text-xs font-medium text-success-600">
+                <span className="font-mono text-xs font-medium text-brand-600">
                   {Math.round(
                     ((lifetimeEarned - lifetimePending) / lifetimeEarned) * 100
                   )}
@@ -359,7 +359,7 @@ export default function PlayerDashboardPage() {
               </div>
               <div className="flex h-2 gap-0.5 overflow-hidden rounded-md bg-gray-100">
                 <div
-                  className="rounded-md bg-success-200 transition-all"
+                  className="rounded-md bg-brand-400 transition-all"
                   style={{
                     width: `${
                       ((lifetimeEarned - lifetimePending) / lifetimeEarned) *
@@ -377,7 +377,7 @@ export default function PlayerDashboardPage() {
                 )}
               </div>
               <div className="mt-2 flex gap-5 text-xs">
-                <span className="text-success-600">
+                <span className="text-brand-600">
                   Cleared lifetime {fmt(lifetimeEarned - lifetimePending)}
                 </span>
                 {lifetimePending > 0 && (

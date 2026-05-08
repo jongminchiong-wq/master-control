@@ -175,7 +175,10 @@ export default function PlayerSimulatorPage() {
       {/* ── COGS ────────────────────────────────────────────── */}
       <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <p className="mb-4 text-xs font-medium uppercase tracking-wide text-brand-600">
-          COGS
+          COGS{" "}
+          <span className="ml-1 normal-case font-normal text-gray-400">
+            (Cost of Goods Sold)
+          </span>
         </p>
         <div className="space-y-3">
           <div className="flex items-baseline justify-between">
@@ -203,7 +206,7 @@ export default function PlayerSimulatorPage() {
       {/* ── My PO ───────────────────────────────────────────── */}
       <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <p className="mb-4 text-xs font-medium uppercase tracking-wide text-brand-600">
-          My PO
+          My Purchase Order
         </p>
 
         <div className="space-y-6">
@@ -213,8 +216,8 @@ export default function PlayerSimulatorPage() {
             <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5 text-xs">
               {(
                 [
-                  { id: "punchout", label: "P", color: "accent" },
-                  { id: "gep", label: "G", color: "brand" },
+                  { id: "punchout", label: "P" },
+                  { id: "gep", label: "G" },
                 ] as const
               ).map((ch) => (
                 <button
@@ -223,9 +226,7 @@ export default function PlayerSimulatorPage() {
                   className={cn(
                     "rounded px-4 py-1.5 font-medium transition-colors",
                     channel === ch.id
-                      ? ch.color === "accent"
-                        ? "bg-white text-accent-600 shadow-sm"
-                        : "bg-white text-brand-600 shadow-sm"
+                      ? "bg-brand-600 text-white shadow-sm"
                       : "text-gray-500 hover:text-gray-700"
                   )}
                 >

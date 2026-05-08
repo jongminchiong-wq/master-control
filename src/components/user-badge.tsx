@@ -50,7 +50,7 @@ export function UserBadge() {
     >
       <span
         aria-hidden
-        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-[11px] font-semibold text-brand-600 transition-colors hover:bg-brand-100"
+        className="flex size-[34px] shrink-0 items-center justify-center rounded-full bg-brand-50 text-[13px] font-semibold text-brand-600 transition-colors hover:bg-brand-100"
       >
         {getInitials(profile.name)}
       </span>
