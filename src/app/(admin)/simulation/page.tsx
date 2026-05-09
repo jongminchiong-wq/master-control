@@ -31,6 +31,9 @@ const PUNCHOUT_EU_TABLES: Record<EUProxyMode, Tier[]> = {
   B: PO_EU_B,
 };
 
+const ratesLabel = (tiers: Tier[]) =>
+  tiers.map((t) => t.rate).join(" / ") + "%";
+
 // Shared components
 import { MetricCard } from "@/components/metric-card";
 import { TierCard } from "@/components/tier-card";
@@ -408,8 +411,8 @@ export default function SimulationPage() {
                   value={euTierModeGrid}
                   onChange={setEuTierModeGrid}
                   options={[
-                    { value: "A", label: "Default", sublabel: "21 / 24 / 27 / 30%", activeText: "text-brand-600" },
-                    { value: "B", label: "Exclusive", sublabel: "24 / 27 / 30 / 33%", activeText: "text-brand-600" },
+                    { value: "A", label: "Default", sublabel: ratesLabel(PO_EU_C), activeText: "text-brand-600" },
+                    { value: "B", label: "Exclusive", sublabel: ratesLabel(PO_EU_C_EXCLUSIVE), activeText: "text-brand-600" },
                   ]}
                 />
               ) : (
@@ -417,9 +420,9 @@ export default function SimulationPage() {
                   value={euTierModeProxy}
                   onChange={setEuTierModeProxy}
                   options={[
-                    { value: "A", label: "Default", sublabel: "24 / 27 / 30 / 33%", activeText: "text-brand-600" },
-                    { value: "A_PLUS", label: "Premium", sublabel: "30 / 33 / 36 / 39%", activeText: "text-brand-600" },
-                    { value: "B", label: "Exclusive", sublabel: "33 / 36 / 39 / 42%", activeText: "text-brand-600" },
+                    { value: "A", label: "Default", sublabel: ratesLabel(PO_EU_A), activeText: "text-brand-600" },
+                    { value: "A_PLUS", label: "Premium", sublabel: ratesLabel(PO_EU_A_PLUS), activeText: "text-brand-600" },
+                    { value: "B", label: "Exclusive", sublabel: ratesLabel(PO_EU_B), activeText: "text-brand-600" },
                   ]}
                 />
               )}
@@ -524,8 +527,8 @@ export default function SimulationPage() {
                   value={introTierModeProxy}
                   onChange={setIntroTierModeProxy}
                   options={[
-                    { value: "A", label: "Default", sublabel: "12 / 15 / 18 / 21%", activeText: "text-purple-600" },
-                    { value: "B", label: "Exclusive", sublabel: "21 / 24 / 27 / 30%", activeText: "text-purple-600" },
+                    { value: "A", label: "Default", sublabel: ratesLabel(PO_INTRO), activeText: "text-purple-600" },
+                    { value: "B", label: "Exclusive", sublabel: ratesLabel(PO_INTRO_EXCLUSIVE), activeText: "text-purple-600" },
                   ]}
                 />
               ) : (
@@ -533,8 +536,8 @@ export default function SimulationPage() {
                   value={introTierModeGrid}
                   onChange={setIntroTierModeGrid}
                   options={[
-                    { value: "A", label: "Default", sublabel: "21 / 24 / 27 / 30%", activeText: "text-purple-600" },
-                    { value: "B", label: "Exclusive", sublabel: "27 / 30 / 33 / 36%", activeText: "text-purple-600" },
+                    { value: "A", label: "Default", sublabel: ratesLabel(PO_INTRO_B), activeText: "text-purple-600" },
+                    { value: "B", label: "Exclusive", sublabel: ratesLabel(GEP_INTRO_B), activeText: "text-purple-600" },
                   ]}
                 />
               )}

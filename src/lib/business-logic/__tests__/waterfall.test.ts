@@ -70,18 +70,18 @@ const recruit: Player = {
   const w = calcPOWaterfall(po, [playerA], [po], 50000);
 
   // monthlyCumulative=50,000 → EU-A Base (24%)
-  // risk: 30k mid2 + local → 2% → cogs 30,600
-  // gross = 50,000 - 30,600 = 19,400
-  // platformFee = 1,500; investorFee = 2,500; pool = 15,400
-  // euAmt = 15,400 × 0.24 = 3,696; entityGross = 11,704
-  close(w.riskAdjustedCogs, 30600, "T1 cogs");
-  close(w.gross, 19400, "T1 gross");
+  // risk: 30k mid2 + local → 1.5% → cogs 30,450
+  // gross = 50,000 - 30,450 = 19,550
+  // platformFee = 1,500; investorFee = 2,500; pool = 15,550
+  // euAmt = 15,550 × 0.24 = 3,732; entityGross = 11,818
+  close(w.riskAdjustedCogs, 30450, "T1 cogs");
+  close(w.gross, 19550, "T1 gross");
   close(w.platformFee, 1500, "T1 platformFee");
   close(w.investorFee, 2500, "T1 investorFee");
-  close(w.pool, 15400, "T1 pool");
-  close(w.euAmt, 3696, "T1 euAmt");
-  close(w.entityGross, 11704, "T1 entityGross");
-  close(w.entityShare, 11704, "T1 entityShare");
+  close(w.pool, 15550, "T1 pool");
+  close(w.euAmt, 3732, "T1 euAmt");
+  close(w.entityGross, 11818, "T1 entityGross");
+  close(w.entityShare, 11818, "T1 entityShare");
   assert.equal(w.euTier.name, "Base");
   assert.equal(w.euTier.rate, 24);
   assert.equal(w.intro, null);
@@ -102,15 +102,15 @@ const recruit: Player = {
   const w = calcPOWaterfall(po, [playerA], [po], 80000);
 
   // monthlyCumulative=80,000 → EU-C Active (24%)
-  // risk: 50k → large (50000<50000 false), sea idx=1 → 2.5% → cogs 51,250
-  // gross = 28,750; platformFee = 0 (gep); investorFee = 4,000; pool = 24,750
-  // euAmt = 24,750 × 0.24 = 5,940; entityGross = 18,810
-  close(w.riskAdjustedCogs, 51250, "T2 cogs");
+  // risk: 50k → large (50000<50000 false), sea idx=1 → 2% → cogs 51,000
+  // gross = 29,000; platformFee = 0 (gep); investorFee = 4,000; pool = 25,000
+  // euAmt = 25,000 × 0.24 = 6,000; entityGross = 19,000
+  close(w.riskAdjustedCogs, 51000, "T2 cogs");
   close(w.platformFee, 0, "T2 platformFee (GEP has none)");
   close(w.investorFee, 4000, "T2 investorFee");
-  close(w.pool, 24750, "T2 pool");
-  close(w.euAmt, 5940, "T2 euAmt");
-  close(w.entityShare, 18810, "T2 entityShare");
+  close(w.pool, 25000, "T2 pool");
+  close(w.euAmt, 6000, "T2 euAmt");
+  close(w.entityShare, 19000, "T2 entityShare");
   assert.equal(w.euTier.name, "Active");
   assert.equal(w.euTier.rate, 24);
   console.log("✓ T2: Fully-funded GEP SMART EU-C Active");
@@ -130,18 +130,18 @@ const recruit: Player = {
   const w = calcPOWaterfall(po, [playerA], [po], 60000);
 
   // monthlyCumulative=100,000 → EU-A Active (75k-150k, 27%)
-  // risk: 60k → large, local → 1.5% → cogs 60,900
-  // gross = 100,000 - 60,900 = 39,100
+  // risk: 60k → large, local → 1% → cogs 60,600
+  // gross = 100,000 - 60,600 = 39,400
   // platformFee = 100,000 × 0.03 = 3,000 (still on poAmount)
   // investorFee = 60,000 × 0.05 = 3,000  ← B1 FIX: scales with deployed
-  // pool = 39,100 - 3,000 - 3,000 = 33,100
-  // euAmt = 33,100 × 0.27 = 8,937; entityGross = 24,163
+  // pool = 39,400 - 3,000 - 3,000 = 33,400
+  // euAmt = 33,400 × 0.27 = 9,018; entityGross = 24,382
   close(w.totalDeployed, 60000, "T3 totalDeployed");
   close(w.platformFee, 3000, "T3 platformFee (on full poAmount)");
   close(w.investorFee, 3000, "T3 investorFee (on deployed, NOT poAmount)");
-  close(w.pool, 33100, "T3 pool");
-  close(w.euAmt, 8937, "T3 euAmt");
-  close(w.entityShare, 24163, "T3 entityShare");
+  close(w.pool, 33400, "T3 pool");
+  close(w.euAmt, 9018, "T3 euAmt");
+  close(w.entityShare, 24382, "T3 entityShare");
 
   // And confirm: if the bug existed, investorFee would be 5,000 and pool 30,500.
   // We assert it's NOT that value.
@@ -162,22 +162,22 @@ const recruit: Player = {
     poDate: "2026-03-15",
     channel: "punchout",
     dos: [
-      { amount: 5000, delivery: "local" }, // small local: 3.5%
-      { amount: 8000, delivery: "sea" }, // small sea: 5.5%
-      { amount: 12000, delivery: "international" }, // mid1 intl: 6%
+      { amount: 5000, delivery: "local" }, // small local: 3%
+      { amount: 8000, delivery: "sea" }, // small sea: 5%
+      { amount: 12000, delivery: "international" }, // mid1 intl: 5.5%
     ],
   };
   const w = calcPOWaterfall(po, [playerA], [po], 30000);
 
-  // cogs = 5000×1.035 + 8000×1.055 + 12000×1.06 = 5175 + 8440 + 12720 = 26,335
-  // gross = 30,000 - 26,335 = 3,665
-  // platformFee = 900; investorFee = 1,500; pool = 1,265
-  // euAmt = 1,265 × 0.24 = 303.6; entityGross = 961.4
+  // cogs = 5000×1.03 + 8000×1.05 + 12000×1.055 = 5150 + 8400 + 12660 = 26,210
+  // gross = 30,000 - 26,210 = 3,790
+  // platformFee = 900; investorFee = 1,500; pool = 1,390
+  // euAmt = 1,390 × 0.24 = 333.6; entityGross = 1,056.4
   close(w.supplierTotal, 25000, "T4 supplierTotal");
-  close(w.riskAdjustedCogs, 26335, "T4 cogs (mixed)");
-  close(w.pool, 1265, "T4 pool");
-  close(w.euAmt, 303.6, "T4 euAmt");
-  close(w.entityShare, 961.4, "T4 entityShare");
+  close(w.riskAdjustedCogs, 26210, "T4 cogs (mixed)");
+  close(w.pool, 1390, "T4 pool");
+  close(w.euAmt, 333.6, "T4 euAmt");
+  close(w.entityShare, 1056.4, "T4 entityShare");
   console.log("✓ T4: Multi-DO mixed delivery");
 }
 
@@ -203,23 +203,23 @@ const recruit: Player = {
   // Compute waterfall on poB. Both POs are in March, both belong to REC.
   // monthlyCumulative for REC = 120,000 → EU-A Active (75k-150k, 27%)
   // recruitTotalPO for INT (recruits = [REC]) in March = 120,000
-  //   → PO_INTRO Active (100k-200k, 15%)
+  //   → PO_INTRO Active (100k-200k, 24%)
   const w = calcPOWaterfall(poB, [introducer, recruit], [poA, poB], 60000);
 
-  // risk on poB: 40k → mid2, local → 2% → cogs 40,800
-  // gross = 60,000 - 40,800 = 19,200
-  // platformFee = 1,800; investorFee = 3,000; pool = 14,400
-  // euAmt = 14,400 × 0.27 = 3,888; entityGross = 10,512
-  // introAmt = 10,512 × 0.15 = 1,576.80; entityShare = 8,935.20
-  close(w.riskAdjustedCogs, 40800, "T5 cogs");
-  close(w.pool, 14400, "T5 pool");
-  close(w.euAmt, 3888, "T5 euAmt");
-  close(w.entityGross, 10512, "T5 entityGross");
-  close(w.introAmt, 1576.8, "T5 introAmt");
-  close(w.entityShare, 8935.2, "T5 entityShare");
+  // risk on poB: 40k → mid2, local → 1.5% → cogs 40,600
+  // gross = 60,000 - 40,600 = 19,400
+  // platformFee = 1,800; investorFee = 3,000; pool = 14,600
+  // euAmt = 14,600 × 0.27 = 3,942; entityGross = 10,658
+  // introAmt = 10,658 × 0.24 = 2,557.92; entityShare = 8,100.08
+  close(w.riskAdjustedCogs, 40600, "T5 cogs");
+  close(w.pool, 14600, "T5 pool");
+  close(w.euAmt, 3942, "T5 euAmt");
+  close(w.entityGross, 10658, "T5 entityGross");
+  close(w.introAmt, 2557.92, "T5 introAmt");
+  close(w.entityShare, 8100.08, "T5 entityShare");
   assert.equal(w.euTier.name, "Active", "T5 euTier");
   assert.equal(w.introTier?.name, "Active", "T5 introTier");
-  assert.equal(w.introRate, 15);
+  assert.equal(w.introRate, 24);
   assert.equal(w.intro?.id, "INT");
   assert.equal(w.monthlyCumulative, 120000);
   console.log("✓ T5: Introducer cohort across multiple recruits' POs");
@@ -261,16 +261,16 @@ const recruit: Player = {
   const w = calcPOWaterfall(po, [playerB], [po], 300000);
 
   // monthlyCumulative=300,000 → EU-B Top (>=250k, 42%)
-  // risk: 200k → large, intl idx=2 → 4% → cogs 208,000
-  // gross = 92,000; platformFee = 9,000; investorFee = 15,000; pool = 68,000
-  // euAmt = 68,000 × 0.42 = 28,560; entityGross = 39,440
-  close(w.riskAdjustedCogs, 208000, "T7 cogs");
-  close(w.gross, 92000, "T7 gross");
+  // risk: 200k → large, intl idx=2 → 3.5% → cogs 207,000
+  // gross = 93,000; platformFee = 9,000; investorFee = 15,000; pool = 69,000
+  // euAmt = 69,000 × 0.42 = 28,980; entityGross = 40,020
+  close(w.riskAdjustedCogs, 207000, "T7 cogs");
+  close(w.gross, 93000, "T7 gross");
   close(w.platformFee, 9000, "T7 platformFee");
   close(w.investorFee, 15000, "T7 investorFee");
-  close(w.pool, 68000, "T7 pool");
-  close(w.euAmt, 28560, "T7 euAmt");
-  close(w.entityShare, 39440, "T7 entityShare");
+  close(w.pool, 69000, "T7 pool");
+  close(w.euAmt, 28980, "T7 euAmt");
+  close(w.entityShare, 40020, "T7 entityShare");
   assert.equal(w.euTier.name, "Top");
   assert.equal(w.euTier.rate, 42);
   console.log("✓ T7: EU-B Top tier, large international");
@@ -325,19 +325,19 @@ const recruit: Player = {
     "T8 GRID rate must not be 24 (combined-monthly regression)"
   );
 
-  // Numbers backing the screenshot (cogs 30k local mid2 = 2% → 30,600):
-  // PRX: gross 19,400; platformFee 1,500; invFee 2,500; pool 15,400; euAmt = 15,400 × 0.24 = 3,696
-  // GRID: gross 19,400; platformFee 0;     invFee 2,500; pool 16,900; euAmt = 16,900 × 0.21 = 3,549
-  close(wPrx.euAmt, 3696, "T8 PRX euAmt");
-  close(wGrid.euAmt, 3549, "T8 GRID euAmt");
+  // Numbers backing the screenshot (cogs 30k local mid2 = 1.5% → 30,450):
+  // PRX: gross 19,550; platformFee 1,500; invFee 2,500; pool 15,550; euAmt = 15,550 × 0.24 = 3,732
+  // GRID: gross 19,550; platformFee 0;     invFee 2,500; pool 17,050; euAmt = 17,050 × 0.21 = 3,580.50
+  close(wPrx.euAmt, 3732, "T8 PRX euAmt");
+  close(wGrid.euAmt, 3580.5, "T8 GRID euAmt");
   console.log("✓ T8: Per-channel tiering (DEF mixed-channel case)");
 }
 
 // ── Test 9: Negative pool, no introducer ──────────────────────
-// PO 50k, supplier 55k local → "large" RB tier 1.5% buffer →
-// risk-adj cogs 55,825; gross -5,825; platformFee 1,500; invFee 2,500
-// → pool -9,825. rawLoss = -pool. EU-A Base 24% → player absorbs
-// 2,358; entity absorbs 7,467.
+// PO 50k, supplier 55k local → "large" RB tier 1% buffer →
+// risk-adj cogs 55,550; gross -5,550; platformFee 1,500; invFee 2,500
+// → pool -9,550. rawLoss = -pool. EU-A Base 24% → player absorbs
+// 2,292; entity absorbs 7,258.
 {
   const po: PurchaseOrder = {
     id: "PO9",
@@ -349,10 +349,10 @@ const recruit: Player = {
   };
   const w = calcPOWaterfall(po, [playerA], [po], 50000);
 
-  close(w.rawLoss, 9825, "T9 rawLoss (= -pool)");
-  close(w.playerLossShare, 2358, "T9 playerLossShare (24% mirror)");
+  close(w.rawLoss, 9550, "T9 rawLoss (= -pool)");
+  close(w.playerLossShare, 2292, "T9 playerLossShare (24% mirror)");
   close(w.introducerLossShare, 0, "T9 introducerLossShare (no intro)");
-  close(w.entityLossShare, 7467, "T9 entityLossShare");
+  close(w.entityLossShare, 7258, "T9 entityLossShare");
   // Sum invariant: shares add back to raw loss
   close(
     w.playerLossShare + w.introducerLossShare + w.entityLossShare,
@@ -366,9 +366,9 @@ const recruit: Player = {
 }
 
 // ── Test 10: Negative pool WITH introducer ─────────────────────
-// Same PO/cost as T9 but recruit→introducer chain. rawLoss = 9,825.
-// EU-A Base 24%, PO_INTRO Base 12% → player 2,358; intro 7,467 × 12% =
-// 896.04; entity 6,570.96.
+// Same PO/cost as T9 but recruit→introducer chain. rawLoss = 9,550.
+// EU-A Base 24%, PO_INTRO Base 21% → player 2,292; intro 7,258 × 21% =
+// 1,524.18; entity 5,733.82.
 {
   const po: PurchaseOrder = {
     id: "PO10",
@@ -380,25 +380,25 @@ const recruit: Player = {
   };
   const w = calcPOWaterfall(po, [introducer, recruit], [po], 50000);
 
-  close(w.rawLoss, 9825, "T10 rawLoss (= -pool)");
-  close(w.playerLossShare, 2358, "T10 playerLossShare (24% mirror)");
-  close(w.introducerLossShare, 896.04, "T10 introducerLossShare (12% of side)");
-  close(w.entityLossShare, 6570.96, "T10 entityLossShare");
+  close(w.rawLoss, 9550, "T10 rawLoss (= -pool)");
+  close(w.playerLossShare, 2292, "T10 playerLossShare (24% mirror)");
+  close(w.introducerLossShare, 1524.18, "T10 introducerLossShare (21% of side)");
+  close(w.entityLossShare, 5733.82, "T10 entityLossShare");
   close(
     w.playerLossShare + w.introducerLossShare + w.entityLossShare,
     w.rawLoss,
     "T10 shares sum to rawLoss"
   );
   assert.equal(w.intro?.id, "INT", "T10 intro present");
-  assert.equal(w.introRate, 12, "T10 intro rate Base 12%");
+  assert.equal(w.introRate, 21, "T10 intro rate Base 21%");
   console.log("✓ T10: Negative pool with introducer (mirror split)");
 }
 
 // ── Test 11: Buffer-only negative pool — split deficit ────────
 // Supplier cost 49,000 (below PO 50,000) but international buffer
-// (mid2 5%) pushes risk-adj cogs to 51,450 → gross -1,450 → pool
-// -5,450. Even though raw cost ≤ PO, the negative pool must be
-// distributed: EU-A Base 24% → player 1,308; entity 4,142.
+// (mid2 4.5%) pushes risk-adj cogs to 51,205 → gross -1,205 → pool
+// -5,205. Even though raw cost ≤ PO, the negative pool must be
+// distributed: EU-A Base 24% → player 1,249.20; entity 3,955.80.
 {
   const po: PurchaseOrder = {
     id: "PO11",
@@ -410,10 +410,10 @@ const recruit: Player = {
   };
   const w = calcPOWaterfall(po, [playerA], [po], 50000);
 
-  close(w.rawLoss, 5450, "T11 rawLoss (= -pool, buffer-only deficit)");
-  close(w.playerLossShare, 1308, "T11 playerLossShare (24% mirror)");
+  close(w.rawLoss, 5205, "T11 rawLoss (= -pool, buffer-only deficit)");
+  close(w.playerLossShare, 1249.2, "T11 playerLossShare (24% mirror)");
   close(w.introducerLossShare, 0, "T11 introducerLossShare zero");
-  close(w.entityLossShare, 4142, "T11 entityLossShare");
+  close(w.entityLossShare, 3955.8, "T11 entityLossShare");
   close(
     w.playerLossShare + w.introducerLossShare + w.entityLossShare,
     w.rawLoss,
@@ -460,23 +460,23 @@ const recruit: Player = {
   };
   const w = calcPOWaterfall(po, [playerA], [po], 50000);
 
-  // T1 baseline: gross 19,400, pool 15,400, euAmt 3,696, entityGross 11,704.
-  // With otherCost 1,000: gross 18,400, pool 14,400, euAmt 3,456, entityGross 10,944.
+  // T1 baseline: gross 19,550, pool 15,550, euAmt 3,732, entityGross 11,818.
+  // With otherCost 1,000: gross 18,550, pool 14,550, euAmt 3,492, entityGross 11,058.
   close(w.otherCost, 1000, "T13 otherCost echoed in result");
-  close(w.riskAdjustedCogs, 30600, "T13 cogs unchanged (no buffer on other)");
-  close(w.gross, 18400, "T13 gross drops by exactly otherCost");
-  close(w.pool, 14400, "T13 pool drops by exactly otherCost");
-  close(w.euAmt, 3456, "T13 euAmt = 14,400 × 24%");
-  close(w.entityGross, 10944, "T13 entityGross = pool − euAmt");
+  close(w.riskAdjustedCogs, 30450, "T13 cogs unchanged (no buffer on other)");
+  close(w.gross, 18550, "T13 gross drops by exactly otherCost");
+  close(w.pool, 14550, "T13 pool drops by exactly otherCost");
+  close(w.euAmt, 3492, "T13 euAmt = 14,550 × 24%");
+  close(w.entityGross, 11058, "T13 entityGross = pool − euAmt");
   close(w.rawLoss, 0, "T13 still profit, no loss split");
   console.log("✓ T13: Other Cost subtracts straight from gross, no buffer");
 }
 
 // ── Test 14: Other Cost can push pool negative → loss split fires ─
-// Same PO but otherCost = 20,000 makes pool −5,600 (4,200 buffer + 1,500
-// platform + 2,500 investor + 20,000 other ≫ 30k profit room). Loss
+// Same PO but otherCost = 20,000 makes pool −4,450 (450 buffer + 1,500
+// platform + 2,500 investor + 20,000 other ≫ 19,550 profit room). Loss
 // distribution must mirror profit split exactly: EU-A Base 24% → player
-// 1,344; entity 4,256.
+// 1,068; entity 3,382.
 {
   const po: PurchaseOrder = {
     id: "PO14",
@@ -489,13 +489,13 @@ const recruit: Player = {
   };
   const w = calcPOWaterfall(po, [playerA], [po], 50000);
 
-  // gross = 50,000 − 30,600 − 20,000 = −600
-  // pool  = −600 − 1,500 − 2,500 = −4,600
-  close(w.gross, -600, "T14 gross negative once other > profit");
-  close(w.pool, -4600, "T14 pool absorbs platform + investor on top");
-  close(w.rawLoss, 4600, "T14 rawLoss = -pool");
-  close(w.playerLossShare, 1104, "T14 playerLossShare (24% of 4,600)");
-  close(w.entityLossShare, 3496, "T14 entityLossShare (76% of 4,600)");
+  // gross = 50,000 − 30,450 − 20,000 = −450
+  // pool  = −450 − 1,500 − 2,500 = −4,450
+  close(w.gross, -450, "T14 gross negative once other > profit");
+  close(w.pool, -4450, "T14 pool absorbs platform + investor on top");
+  close(w.rawLoss, 4450, "T14 rawLoss = -pool");
+  close(w.playerLossShare, 1068, "T14 playerLossShare (24% of 4,450)");
+  close(w.entityLossShare, 3382, "T14 entityLossShare (76% of 4,450)");
   close(
     w.playerLossShare + w.introducerLossShare + w.entityLossShare,
     w.rawLoss,

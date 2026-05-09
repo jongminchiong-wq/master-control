@@ -77,28 +77,28 @@ export const PO_EU_C_EXCLUSIVE: Tier[] = [
 // ── EU Introducer Tiers — Punchout channel (Default) ────────
 
 export const PO_INTRO: Tier[] = [
-  { name: "Base", rate: 12, min: 0, max: 100000 },
-  { name: "Active", rate: 15, min: 100001, max: 200000 },
-  { name: "Pro", rate: 18, min: 200001, max: 400000 },
-  { name: "Elite", rate: 21, min: 400001, max: Infinity },
+  { name: "Base", rate: 21, min: 0, max: 100000 },
+  { name: "Active", rate: 24, min: 100001, max: 200000 },
+  { name: "Pro", rate: 27, min: 200001, max: 400000 },
+  { name: "Elite", rate: 30, min: 400001, max: Infinity },
 ];
 
 // ── EU Introducer Tiers — Punchout channel (Exclusive) ──────
 
 export const PO_INTRO_EXCLUSIVE: Tier[] = [
-  { name: "Base", rate: 21, min: 0, max: 100000 },
-  { name: "Active", rate: 24, min: 100001, max: 200000 },
-  { name: "Pro", rate: 27, min: 200001, max: 400000 },
-  { name: "Elite", rate: 30, min: 400001, max: Infinity },
+  { name: "Base", rate: 24, min: 0, max: 100000 },
+  { name: "Active", rate: 27, min: 100001, max: 200000 },
+  { name: "Pro", rate: 30, min: 200001, max: 400000 },
+  { name: "Elite", rate: 33, min: 400001, max: Infinity },
 ];
 
 // ── EU Introducer Tiers — GEP channel A ─────────────────────
 
 export const PO_INTRO_B: Tier[] = [
-  { name: "Base", rate: 21, min: 0, max: 100000 },
-  { name: "Active", rate: 24, min: 100001, max: 200000 },
-  { name: "Pro", rate: 27, min: 200001, max: 400000 },
-  { name: "Elite", rate: 30, min: 400001, max: Infinity },
+  { name: "Base", rate: 24, min: 0, max: 100000 },
+  { name: "Active", rate: 27, min: 100001, max: 200000 },
+  { name: "Pro", rate: 30, min: 200001, max: 400000 },
+  { name: "Elite", rate: 33, min: 400001, max: Infinity },
 ];
 
 // ── EU Introducer Tiers — GEP channel B ─────────────────────
@@ -135,8 +135,8 @@ export const RB_PO_TIERS: RBPOTier[] = [
 ];
 
 export const BUFFER_TABLE: Record<RBPOTier["id"], [number, number, number]> = {
-  small: [3.5, 5.5, 7.5],
-  mid1: [2.5, 4, 6],
-  mid2: [2, 3.5, 5],
-  large: [1.5, 2.5, 4],
+  small: [3, 5, 7],
+  mid1: [2, 3.5, 5.5],
+  mid2: [1.5, 3, 4.5],
+  large: [1, 2, 3.5],
 };
