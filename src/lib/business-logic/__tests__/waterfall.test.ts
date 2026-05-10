@@ -203,23 +203,23 @@ const recruit: Player = {
   // Compute waterfall on poB. Both POs are in March, both belong to REC.
   // monthlyCumulative for REC = 120,000 → EU-A Active (75k-150k, 27%)
   // recruitTotalPO for INT (recruits = [REC]) in March = 120,000
-  //   → PO_INTRO Active (100k-200k, 24%)
+  //   → PO_INTRO Active (100k-200k, 27%)
   const w = calcPOWaterfall(poB, [introducer, recruit], [poA, poB], 60000);
 
   // risk on poB: 40k → mid2, local → 1.5% → cogs 40,600
   // gross = 60,000 - 40,600 = 19,400
   // platformFee = 1,800; investorFee = 3,000; pool = 14,600
   // euAmt = 14,600 × 0.27 = 3,942; entityGross = 10,658
-  // introAmt = 10,658 × 0.24 = 2,557.92; entityShare = 8,100.08
+  // introAmt = 10,658 × 0.27 = 2,877.66; entityShare = 7,780.34
   close(w.riskAdjustedCogs, 40600, "T5 cogs");
   close(w.pool, 14600, "T5 pool");
   close(w.euAmt, 3942, "T5 euAmt");
   close(w.entityGross, 10658, "T5 entityGross");
-  close(w.introAmt, 2557.92, "T5 introAmt");
-  close(w.entityShare, 8100.08, "T5 entityShare");
+  close(w.introAmt, 2877.66, "T5 introAmt");
+  close(w.entityShare, 7780.34, "T5 entityShare");
   assert.equal(w.euTier.name, "Active", "T5 euTier");
   assert.equal(w.introTier?.name, "Active", "T5 introTier");
-  assert.equal(w.introRate, 24);
+  assert.equal(w.introRate, 27);
   assert.equal(w.intro?.id, "INT");
   assert.equal(w.monthlyCumulative, 120000);
   console.log("✓ T5: Introducer cohort across multiple recruits' POs");
@@ -367,8 +367,8 @@ const recruit: Player = {
 
 // ── Test 10: Negative pool WITH introducer ─────────────────────
 // Same PO/cost as T9 but recruit→introducer chain. rawLoss = 9,550.
-// EU-A Base 24%, PO_INTRO Base 21% → player 2,292; intro 7,258 × 21% =
-// 1,524.18; entity 5,733.82.
+// EU-A Base 24%, PO_INTRO Base 24% → player 2,292; intro 7,258 × 24% =
+// 1,741.92; entity 5,516.08.
 {
   const po: PurchaseOrder = {
     id: "PO10",
@@ -382,15 +382,15 @@ const recruit: Player = {
 
   close(w.rawLoss, 9550, "T10 rawLoss (= -pool)");
   close(w.playerLossShare, 2292, "T10 playerLossShare (24% mirror)");
-  close(w.introducerLossShare, 1524.18, "T10 introducerLossShare (21% of side)");
-  close(w.entityLossShare, 5733.82, "T10 entityLossShare");
+  close(w.introducerLossShare, 1741.92, "T10 introducerLossShare (24% of side)");
+  close(w.entityLossShare, 5516.08, "T10 entityLossShare");
   close(
     w.playerLossShare + w.introducerLossShare + w.entityLossShare,
     w.rawLoss,
     "T10 shares sum to rawLoss"
   );
   assert.equal(w.intro?.id, "INT", "T10 intro present");
-  assert.equal(w.introRate, 21, "T10 intro rate Base 21%");
+  assert.equal(w.introRate, 24, "T10 intro rate Base 24%");
   console.log("✓ T10: Negative pool with introducer (mirror split)");
 }
 

@@ -77,19 +77,19 @@ export const PO_EU_C_EXCLUSIVE: Tier[] = [
 // ── EU Introducer Tiers — Punchout channel (Default) ────────
 
 export const PO_INTRO: Tier[] = [
-  { name: "Base", rate: 21, min: 0, max: 100000 },
-  { name: "Active", rate: 24, min: 100001, max: 200000 },
-  { name: "Pro", rate: 27, min: 200001, max: 400000 },
-  { name: "Elite", rate: 30, min: 400001, max: Infinity },
+  { name: "Base", rate: 24, min: 0, max: 100000 },
+  { name: "Active", rate: 27, min: 100001, max: 200000 },
+  { name: "Pro", rate: 30, min: 200001, max: 400000 },
+  { name: "Elite", rate: 33, min: 400001, max: Infinity },
 ];
 
 // ── EU Introducer Tiers — Punchout channel (Exclusive) ──────
 
 export const PO_INTRO_EXCLUSIVE: Tier[] = [
-  { name: "Base", rate: 24, min: 0, max: 100000 },
-  { name: "Active", rate: 27, min: 100001, max: 200000 },
-  { name: "Pro", rate: 30, min: 200001, max: 400000 },
-  { name: "Elite", rate: 33, min: 400001, max: Infinity },
+  { name: "Base", rate: 27, min: 0, max: 100000 },
+  { name: "Active", rate: 30, min: 100001, max: 200000 },
+  { name: "Pro", rate: 33, min: 200001, max: 400000 },
+  { name: "Elite", rate: 36, min: 400001, max: Infinity },
 ];
 
 // ── EU Introducer Tiers — GEP channel A ─────────────────────

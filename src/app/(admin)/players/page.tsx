@@ -195,12 +195,12 @@ function PlayersPageContent() {
   // Month selector (URL-driven, shared across admin pages)
   const [selectedMonth, setSelectedMonth] = useSelectedMonth();
 
-  // Form state — DB defaults: eu_proxy 'A', eu_grid 'B', intro_proxy 'B', intro_grid 'A'
+  // Form state — DB defaults: eu_proxy 'A', eu_grid 'B', intro_proxy 'A', intro_grid 'A'
   const emptyForm = {
     name: "",
     eu_tier_mode_proxy: "A" as EUProxyMode,
     eu_tier_mode_grid: "B" as EUGridMode,
-    intro_tier_mode_proxy: "B" as IntroMode,
+    intro_tier_mode_proxy: "A" as IntroMode,
     intro_tier_mode_grid: "A" as IntroMode,
     introduced_by: "",
   };

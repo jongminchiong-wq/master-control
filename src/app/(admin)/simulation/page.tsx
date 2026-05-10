@@ -16,7 +16,12 @@ import {
   PO_INTRO_B,
   GEP_INTRO_B,
   INV_INTRO_TIERS,
+  BUFFER_TABLE,
+  RB_PO_TIERS,
+  DELIVERY_MODES,
   type Tier,
+  type RBPOTier,
+  type DeliveryMode,
 } from "@/lib/business-logic/constants";
 import { getTier, getInvIntroTier } from "@/lib/business-logic/tiers";
 import { fmt } from "@/lib/business-logic/formatters";
@@ -34,6 +39,23 @@ const PUNCHOUT_EU_TABLES: Record<EUProxyMode, Tier[]> = {
 const ratesLabel = (tiers: Tier[]) =>
   tiers.map((t) => t.rate).join(" / ") + "%";
 
+// ── Risk buffer options (4 size buckets x 3 delivery modes = 12) ──
+
+type RiskBufferKey = `${RBPOTier["id"]}:${DeliveryMode["id"]}`;
+
+const RISK_BUFFER_OPTIONS: { key: RiskBufferKey; label: string; pct: number }[] =
+  RB_PO_TIERS.flatMap((size) =>
+    DELIVERY_MODES.map((delivery) => {
+      const idx = delivery.id === "local" ? 0 : delivery.id === "sea" ? 1 : 2;
+      const pct = BUFFER_TABLE[size.id][idx];
+      return {
+        key: `${size.id}:${delivery.id}` as RiskBufferKey,
+        label: `${size.label} · ${delivery.label} — ${pct}%`,
+        pct,
+      };
+    })
+  );
+
 // Shared components
 import { MetricCard } from "@/components/metric-card";
 import { TierCard } from "@/components/tier-card";
@@ -43,6 +65,13 @@ import { WaterfallTable } from "@/components/waterfall-table";
 // UI components
 import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // ── Card chrome (matches MetricCard / player simulator) ────
 
@@ -243,6 +272,7 @@ export default function SimulationPage() {
   // Deal variables
   const [monthlyPOVol, setMonthlyPOVol] = useState(100000);
   const [cogsPercent, setCogsPercent] = useState(80);
+  const [riskBufferKey, setRiskBufferKey] = useState<RiskBufferKey>("mid2:sea");
 
   // Investor
   const [invTierIdx, setInvTierIdx] = useState(2); // default Gold (5%)
@@ -250,8 +280,8 @@ export default function SimulationPage() {
   // End-user network
   const [numEndUsers, setNumEndUsers] = useState(1);
 
-  // EU introducer modes — independent per channel (DB defaults: Proxy=B, Grid=A)
-  const [introTierModeProxy, setIntroTierModeProxy] = useState<IntroMode>("B");
+  // EU introducer modes — independent per channel (DB defaults: Proxy=A, Grid=A)
+  const [introTierModeProxy, setIntroTierModeProxy] = useState<IntroMode>("A");
   const [introTierModeGrid, setIntroTierModeGrid] = useState<IntroMode>("A");
 
   // Investor network
@@ -302,7 +332,11 @@ export default function SimulationPage() {
     const invIntroPct = invIntroTier.rate;
 
     // Waterfall math
-    const cogs = totalGroupPO * (cogsPercent / 100);
+    const baseCogs = totalGroupPO * (cogsPercent / 100);
+    const riskBufferPct =
+      RISK_BUFFER_OPTIONS.find((o) => o.key === riskBufferKey)?.pct ?? 0;
+    const riskBufferAmt = baseCogs * (riskBufferPct / 100);
+    const cogs = baseCogs + riskBufferAmt;
     const grossProfit = totalGroupPO - cogs;
     const punchoutFee = punchoutOn ? totalGroupPO * 0.03 : 0;
     const investorFee = totalGroupPO * (invRate / 100);
@@ -336,6 +370,9 @@ export default function SimulationPage() {
       totalInvCapital,
       invIntroTier,
       invIntroPct,
+      baseCogs,
+      riskBufferPct,
+      riskBufferAmt,
       cogs,
       grossProfit,
       punchoutFee,
@@ -358,6 +395,7 @@ export default function SimulationPage() {
     euTierModeGrid,
     monthlyPOVol,
     cogsPercent,
+    riskBufferKey,
     invTierIdx,
     numEndUsers,
     introTierModeProxy,
@@ -469,6 +507,31 @@ export default function SimulationPage() {
               step={1}
               onChange={setCogsPercent}
             />
+
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                Risk buffer
+              </p>
+              <Select
+                value={riskBufferKey}
+                onValueChange={(v) => setRiskBufferKey(v as RiskBufferKey)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {RISK_BUFFER_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.key} value={opt.key}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-center text-[10px] font-medium text-danger-600">
+                Adds {fmt(calc.riskBufferAmt)} on top of base COGS (
+                {calc.riskBufferPct}%)
+              </p>
+            </div>
 
             <hr className="border-gray-200" />
 
@@ -671,17 +734,11 @@ export default function SimulationPage() {
             </p>
 
             {/* Top metrics */}
-            <div className="grid grid-cols-2 gap-3">
-              <MetricCard
-                label="Total group PO"
-                value={fmt(calc.totalGroupPO)}
-                subtitle={`${numEndUsers} player${numEndUsers > 1 ? "s" : ""} x ${fmt(monthlyPOVol)}`}
-              />
-              <MetricCard
-                label={`COGS (${cogsPercent}%)`}
-                value={fmt(calc.cogs)}
-              />
-            </div>
+            <MetricCard
+              label="Total group PO"
+              value={fmt(calc.totalGroupPO)}
+              subtitle={`${numEndUsers} player${numEndUsers > 1 ? "s" : ""} x ${fmt(monthlyPOVol)}`}
+            />
 
             {/* Gross profit */}
             <MetricCard
@@ -689,27 +746,6 @@ export default function SimulationPage() {
               value={fmt(calc.grossProfit)}
               color="success"
             />
-
-            {/* Cost deductions */}
-            <div className="grid grid-cols-2 gap-3">
-              <MetricCard
-                label={`P (3%)`}
-                value={fmt(calc.punchoutFee)}
-                subtitle={
-                  punchoutOn
-                    ? `3% x ${fmt(calc.totalGroupPO)} PO`
-                    : "G — no platform fee"
-                }
-                color={punchoutOn ? "danger" : "default"}
-                className={!punchoutOn ? "opacity-50" : undefined}
-              />
-              <MetricCard
-                label={`Investor (${calc.invRate}%)`}
-                value={fmt(calc.investorFee)}
-                subtitle={`${calc.invRate}% x ${fmt(calc.totalGroupPO)} PO`}
-                color="danger"
-              />
-            </div>
 
             {/* Pool */}
             <MetricCard
@@ -828,7 +864,12 @@ export default function SimulationPage() {
               },
               {
                 label: `COGS (${cogsPercent}%)`,
-                val: -calc.cogs,
+                val: -calc.baseCogs,
+                color: "danger",
+              },
+              {
+                label: `Risk buffer (${calc.riskBufferPct}%)`,
+                val: -calc.riskBufferAmt,
                 color: "danger",
               },
               {
