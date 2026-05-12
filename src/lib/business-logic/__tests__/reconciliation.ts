@@ -122,6 +122,7 @@ async function main() {
     introTierModeProxy: p.intro_tier_mode_proxy,
     introTierModeGrid: p.intro_tier_mode_grid,
     introducedBy: p.introduced_by,
+    uplineId: p.upline_id,
   }));
 
   const wAllPOs: PurchaseOrder[] = allPOs.map((po) => ({

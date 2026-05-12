@@ -71,6 +71,7 @@ function toWaterfallPlayer(p: DBPlayer): Player {
     introTierModeProxy: p.intro_tier_mode_proxy,
     introTierModeGrid: p.intro_tier_mode_grid,
     introducedBy: p.introduced_by,
+    uplineId: p.upline_id,
   };
 }
 
@@ -136,6 +137,13 @@ interface POEntityData extends WaterfallResult {
   payableIntroAmt: number;
   payablePlayerLossShare: number;
   payableIntroducerLossShare: number;
+  // Dual-introducer split. Non-zero only when the PO's direct introducer
+  // has an upline (players.upline_id). uplineAmt is Alice's slice of the
+  // intro chunk; uplineLossShare is her share of the cost-overrun loss.
+  // The introAmt / introducerLossShare fields above are already reduced
+  // to Bob's keep, so total intro paid out = intro + upline.
+  payableUplineAmt: number;
+  payableUplineLossShare: number;
 }
 
 interface InvestorBreakdownRow {
@@ -630,6 +638,8 @@ function EntityPageContent() {
           payableIntroAmt: wPayable.introAmt,
           payablePlayerLossShare: wPayable.playerLossShare,
           payableIntroducerLossShare: wPayable.introducerLossShare,
+          payableUplineAmt: wPayable.uplineAmt,
+          payableUplineLossShare: wPayable.uplineLossShare,
         };
       });
   }, [monthPOs, wPlayers, wAllPOs, deployments]);
@@ -655,8 +665,17 @@ function EntityPageContent() {
     (s, p) => s + p.euAmt - p.playerLossShare,
     0
   );
+  // Total intro paid out per PO = Bob's share + Alice's (upline) share,
+  // net of each side's loss. introAmt/uplineAmt are pre-split; summing
+  // them reconstructs the full chunk so single- and dual-intro POs feed
+  // the same P&L line.
   const totalIntroComm = revenuePOs.reduce(
-    (s, p) => s + p.introAmt - p.introducerLossShare,
+    (s, p) =>
+      s +
+      p.introAmt +
+      p.uplineAmt -
+      p.introducerLossShare -
+      p.uplineLossShare,
     0
   );
   const entityGrossIncome = revenuePOs.reduce((s, p) => s + p.entityShare, 0);
@@ -684,7 +703,12 @@ function EntityPageContent() {
     0
   );
   const payableIntroComm = fullyPaidPOs.reduce(
-    (s, p) => s + p.payableIntroAmt - p.payableIntroducerLossShare,
+    (s, p) =>
+      s +
+      p.payableIntroAmt +
+      p.payableUplineAmt -
+      p.payableIntroducerLossShare -
+      p.payableUplineLossShare,
     0
   );
   const payableInvestorReturns = deployments
@@ -706,15 +730,34 @@ function EntityPageContent() {
           (s, po) => s + po.payableEuAmt - po.payablePlayerLossShare,
           0
         );
-        // Intro earnings — POs from this player's recruits
+        // Direct introducer earnings — POs from this player's recruits.
+        // payableIntroAmt is already Bob's keep in dual-intro mode.
         const recruits = players.filter((x) => x.introduced_by === p.id);
         const recruitPOs = fullyPaidPOs.filter((po) =>
           recruits.some((r) => r.id === po.endUserId)
         );
-        const introComm = recruitPOs.reduce(
+        const directIntroComm = recruitPOs.reduce(
           (s, po) => s + po.payableIntroAmt - po.payableIntroducerLossShare,
           0
         );
+        // Upline earnings — POs whose direct introducer has this player
+        // as their upline (chain: this player → downline B → end user).
+        const downlineIds = new Set(
+          players.filter((x) => x.upline_id === p.id).map((x) => x.id)
+        );
+        const downlineRecruitIds = new Set(
+          players
+            .filter((x) => x.introduced_by && downlineIds.has(x.introduced_by))
+            .map((x) => x.id)
+        );
+        const uplinePOs = fullyPaidPOs.filter((po) =>
+          downlineRecruitIds.has(po.endUserId)
+        );
+        const uplineComm = uplinePOs.reduce(
+          (s, po) => s + po.payableUplineAmt - po.payableUplineLossShare,
+          0
+        );
+        const introComm = directIntroComm + uplineComm;
         const total = euComm + introComm;
         return { name: p.name, euComm, introComm, total };
       })

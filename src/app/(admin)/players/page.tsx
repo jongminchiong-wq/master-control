@@ -74,11 +74,11 @@ type DBPO = Tables<"purchase_orders"> & {
 
 type EUProxyMode = "A" | "A_PLUS" | "B";
 type EUGridMode = "A" | "B";
-type IntroMode = "A" | "B";
+type IntroMode = "A" | "A_PLUS" | "B";
 
 const EU_PROXY_MODES: readonly EUProxyMode[] = ["A", "A_PLUS", "B"] as const;
 const EU_GRID_MODES: readonly EUGridMode[] = ["A", "B"] as const;
-const INTRO_MODES: readonly IntroMode[] = ["A", "B"] as const;
+const INTRO_MODES: readonly IntroMode[] = ["A", "A_PLUS", "B"] as const;
 
 const EU_PROXY_LABELS: Record<EUProxyMode, string> = {
   A: "Default (24-33%)",
@@ -93,11 +93,13 @@ const EU_GRID_LABELS: Record<EUGridMode, string> = {
 
 const INTRO_PROXY_LABELS: Record<IntroMode, string> = {
   A: "Default (12-21%)",
+  A_PLUS: "Premium (30-39%)",
   B: "Exclusive (21-30%)",
 };
 
 const INTRO_GRID_LABELS: Record<IntroMode, string> = {
   A: "Default (21-30%)",
+  A_PLUS: "Premium (30-39%)",
   B: "Exclusive (27-36%)",
 };
 
@@ -110,7 +112,7 @@ function narrowEUGrid(v: string): EUGridMode {
 }
 
 function narrowIntro(v: string): IntroMode {
-  return v === "B" ? "B" : "A";
+  return v === "B" || v === "A_PLUS" ? v : "A";
 }
 
 // ── DB → Business-logic mappers ─────────────────────────────
@@ -123,6 +125,7 @@ function toWaterfallPlayer(p: DBPlayer): WaterfallPlayer {
     introTierModeProxy: p.intro_tier_mode_proxy,
     introTierModeGrid: p.intro_tier_mode_grid,
     introducedBy: p.introduced_by,
+    uplineId: p.upline_id,
   };
 }
 
@@ -203,6 +206,7 @@ function PlayersPageContent() {
     intro_tier_mode_proxy: "A" as IntroMode,
     intro_tier_mode_grid: "A" as IntroMode,
     introduced_by: "",
+    upline_id: "",
   };
   const [form, setForm] = useState(emptyForm);
 
@@ -303,6 +307,29 @@ function PlayersPageContent() {
         }
       }
 
+      // Upline earnings: when this player is somebody else's upline, the
+      // dual-intro split routes (1 − introRate%) of the chunk to them.
+      // Find downlines (B's whose upline_id is this player), then sum
+      // (uplineAmt − uplineLossShare) over POs from B's recruits.
+      const downlines = players.filter((d) => d.upline_id === p.id);
+      for (const dl of downlines) {
+        const dlRecruits = players.filter((r) => r.introduced_by === dl.id);
+        for (const r of dlRecruits) {
+          const dlRecruitPOs = monthPOs.filter(
+            (po) => po.end_user_id === r.id
+          );
+          for (const po of dlRecruitPOs) {
+            const w = calcPOWaterfall(
+              toWaterfallPO(po),
+              wPlayers,
+              wAllPOs,
+              po.po_amount
+            );
+            introComm += w.uplineAmt - w.uplineLossShare;
+          }
+        }
+      }
+
       stats.set(p.id, {
         totalPO,
         euComm,
@@ -341,6 +368,7 @@ function PlayersPageContent() {
       intro_tier_mode_proxy: form.intro_tier_mode_proxy,
       intro_tier_mode_grid: form.intro_tier_mode_grid,
       introduced_by: form.introduced_by || null,
+      upline_id: form.upline_id || null,
     });
     setForm(emptyForm);
     setShowAddDialog(false);
@@ -360,6 +388,7 @@ function PlayersPageContent() {
         intro_tier_mode_proxy: form.intro_tier_mode_proxy,
         intro_tier_mode_grid: form.intro_tier_mode_grid,
         introduced_by: form.introduced_by || null,
+        upline_id: form.upline_id || null,
       })
       .eq("id", editingPlayer.id);
     setEditingPlayer(null);
@@ -416,6 +445,7 @@ function PlayersPageContent() {
       intro_tier_mode_proxy: narrowIntro(player.intro_tier_mode_proxy),
       intro_tier_mode_grid: narrowIntro(player.intro_tier_mode_grid),
       introduced_by: player.introduced_by ?? "",
+      upline_id: player.upline_id ?? "",
     });
     setEditingPlayer(player);
   }
@@ -658,6 +688,7 @@ function PlayerFormDialog({
     intro_tier_mode_proxy: IntroMode;
     intro_tier_mode_grid: IntroMode;
     introduced_by: string;
+    upline_id: string;
   };
   setForm: (
     f: typeof form | ((prev: typeof form) => typeof form)
@@ -832,6 +863,67 @@ function PlayerFormDialog({
               </SelectContent>
             </Select>
           </div>
+
+          {/* Upline (optional dual-introducer) — when set, this player's
+              own intro commission chunk is split with their upline using
+              the same tier rate that sizes the chunk. Candidates must
+              have no upline of their own (chain depth = 1).
+              Hidden if this player is currently somebody else's upline,
+              to enforce the same depth invariant from the other side. */}
+          {(() => {
+            const isCurrentlyAnUpline = excludeId
+              ? players.some((p) => p.upline_id === excludeId)
+              : false;
+            if (isCurrentlyAnUpline) {
+              return (
+                <div className="rounded-md bg-amber-50 px-3 py-2 text-[11px] text-amber-700 ring-1 ring-amber-200">
+                  This player is already an upline for someone else, so
+                  they cannot themselves have an upline. Chain depth is
+                  one level.
+                </div>
+              );
+            }
+            const candidates = players.filter(
+              (p) => p.id !== excludeId && p.upline_id == null
+            );
+            return (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500">
+                  Upline <span className="text-gray-400">(optional)</span>
+                </label>
+                <Select
+                  items={[
+                    { value: "__none__", label: "None" },
+                    ...candidates.map((p) => ({ value: p.id, label: p.name })),
+                  ]}
+                  value={form.upline_id || "__none__"}
+                  onValueChange={(v) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      upline_id: v === "__none__" ? "" : (v ?? ""),
+                    }))
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
+                    {candidates.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1 text-[10px] leading-snug text-gray-500">
+                  When set, this player&apos;s intro commission is split:
+                  they keep their own tier % (24/27/30/33), the upline
+                  gets the rest.
+                </p>
+              </div>
+            );
+          })()}
         </div>
 
         <DialogFooter>
@@ -977,7 +1069,15 @@ function PlayerRow({
           {totalComm === 0 ? "--" : fmtSigned(totalComm)}
         </TableCell>
         <TableCell className="text-xs text-gray-500">
-          {introducer?.name ?? "--"}
+          <div className="flex flex-col gap-0.5">
+            <span>{introducer?.name ?? "--"}</span>
+            {player.upline_id && (
+              <span className="font-mono text-[9px] uppercase tracking-wider text-purple-600">
+                + upline:{" "}
+                {players.find((p) => p.id === player.upline_id)?.name ?? "?"}
+              </span>
+            )}
+          </div>
         </TableCell>
         <TableCell>
           <div
@@ -1265,11 +1365,15 @@ function PlayerRow({
                 )}
               </div>
 
-              {/* Introducer Earnings */}
-              {recruits.length > 0 && (
+              {/* Introducer Earnings — also fires when the player is
+                  somebody's upline (no direct recruits but earns the
+                  upline slice from downline B's recruits). */}
+              {(recruits.length > 0 ||
+                players.some((d) => d.upline_id === player.id)) && (
                 <IntroducerEarnings
                   player={player}
                   recruits={recruits}
+                  allPlayers={players}
                   monthPOs={monthPOs}
                   wPlayers={wPlayers}
                   wAllPOs={wAllPOs}
@@ -1289,6 +1393,7 @@ function PlayerRow({
 function IntroducerEarnings({
   player,
   recruits,
+  allPlayers,
   monthPOs,
   wPlayers,
   wAllPOs,
@@ -1296,12 +1401,12 @@ function IntroducerEarnings({
 }: {
   player: DBPlayer;
   recruits: DBPlayer[];
+  allPlayers: DBPlayer[];
   monthPOs: DBPO[];
   wPlayers: WaterfallPlayer[];
   wAllPOs: WaterfallPO[];
   introComm: number;
 }) {
-  void player;
   const [expandedRecruitId, setExpandedRecruitId] = useState<string | null>(
     null
   );
@@ -1338,11 +1443,58 @@ function IntroducerEarnings({
 
   const groupPO = recruitData.reduce((s, r) => s + r.monthlyPO, 0);
 
+  // Downline earnings — when this player is somebody's upline, gather
+  // POs from each downline's recruits and surface this player's upline
+  // slice (uplineAmt, the bigger piece — typically 67–76% of the chunk).
+  const downlines = allPlayers.filter((d) => d.upline_id === player.id);
+  const downlineData = downlines.map((dl) => {
+    const dlRecruits = allPlayers.filter((x) => x.introduced_by === dl.id);
+    const pos = monthPOs
+      .filter((po) => dlRecruits.some((r) => r.id === po.end_user_id))
+      .map((po) => {
+        const w = calcPOWaterfall(
+          toWaterfallPO(po),
+          wPlayers,
+          wAllPOs,
+          po.po_amount
+        );
+        const recruit = dlRecruits.find((r) => r.id === po.end_user_id);
+        return {
+          id: po.id,
+          ref: po.ref,
+          date: po.po_date,
+          channel: po.channel as "punchout" | "gep",
+          poAmount: po.po_amount,
+          recruitName: recruit?.name ?? "—",
+          netUplineAmt: w.uplineAmt - w.uplineLossShare,
+          commStatus: getCommissionStatus(po),
+        };
+      });
+    return {
+      id: dl.id,
+      name: dl.name,
+      monthlyPO: pos.reduce((s, p) => s + p.poAmount, 0),
+      uplineComm: pos.reduce((s, p) => s + p.netUplineAmt, 0),
+      pos,
+    };
+  });
+
+  const directIntroTotal = recruitData.reduce(
+    (s, r) => s + r.introComm,
+    0
+  );
+  const downlineUplineTotal = downlineData.reduce(
+    (s, d) => s + d.uplineComm,
+    0
+  );
+  const hasDownlineEarnings = downlineData.some((dl) => dl.pos.length > 0);
+
   return (
-    <div className="rounded-lg border border-purple-100 bg-purple-50/30 p-4">
-      <p className="mb-3 text-[10px] font-medium uppercase tracking-wider text-purple-600">
+    <div className="space-y-4 rounded-lg border border-purple-100 bg-purple-50/30 p-4">
+      <p className="text-[10px] font-medium uppercase tracking-wider text-purple-600">
         Introducer Earnings
       </p>
+      {recruits.length > 0 && (
       <Table>
         <TableHeader>
           <TableRow>
@@ -1489,21 +1641,141 @@ function IntroducerEarnings({
           })}
           <TableRow className="border-t-2 border-gray-200">
             <TableCell />
-            <TableCell className="text-xs font-medium">Total</TableCell>
+            <TableCell className="text-xs font-medium">
+              Direct recruits subtotal
+            </TableCell>
             <TableCell className="font-mono text-xs font-medium">
               {fmt(groupPO)}
             </TableCell>
             <TableCell
               className={cn(
                 "font-mono text-xs font-medium",
-                introComm < 0 ? "text-danger-600" : "text-purple-600"
+                directIntroTotal < 0 ? "text-danger-600" : "text-purple-600"
               )}
             >
-              {fmtSigned(introComm)}
+              {fmtSigned(directIntroTotal)}
             </TableCell>
           </TableRow>
         </TableBody>
       </Table>
+      )}
+
+      {hasDownlineEarnings && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-medium uppercase tracking-wider text-purple-600">
+            Downline introducer earnings
+          </p>
+          <p className="text-[10px] leading-snug text-gray-500">
+            This player is the upline for {downlines.length} introducer
+            {downlines.length !== 1 ? "s" : ""}. When their recruits place
+            a PO, this player earns the upline slice — the larger piece of
+            the intro chunk after the direct introducer keeps their tier
+            rate.
+          </p>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-[9px] uppercase tracking-wider text-purple-600">
+                  Downline
+                </TableHead>
+                <TableHead className="text-[9px] uppercase tracking-wider text-purple-600">
+                  Recruit
+                </TableHead>
+                <TableHead className="text-[9px] uppercase tracking-wider text-purple-600">
+                  Ref
+                </TableHead>
+                <TableHead className="text-right text-[9px] uppercase tracking-wider text-purple-600">
+                  PO Amount
+                </TableHead>
+                <TableHead className="text-right text-[9px] uppercase tracking-wider text-purple-600">
+                  Upline Slice
+                </TableHead>
+                <TableHead className="text-[9px] uppercase tracking-wider text-purple-600">
+                  Status
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {downlineData.flatMap((dl) =>
+                dl.pos.length === 0
+                  ? []
+                  : dl.pos.map((p, idx) => (
+                      <TableRow key={`${dl.id}_${p.id}`}>
+                        <TableCell className="text-xs font-medium text-gray-800">
+                          {idx === 0 ? dl.name : ""}
+                        </TableCell>
+                        <TableCell className="text-xs text-gray-700">
+                          {p.recruitName}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "font-mono text-xs font-medium",
+                            p.channel === "gep"
+                              ? "text-brand-600"
+                              : "text-accent-600"
+                          )}
+                        >
+                          {p.ref}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs">
+                          {fmt(p.poAmount)}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "text-right font-mono text-xs font-medium",
+                            p.netUplineAmt < 0
+                              ? "text-danger-600"
+                              : "text-purple-600"
+                          )}
+                        >
+                          {fmtSigned(p.netUplineAmt)}
+                        </TableCell>
+                        <TableCell>
+                          <CommissionStatusBadge status={p.commStatus} />
+                        </TableCell>
+                      </TableRow>
+                    ))
+              )}
+              <TableRow className="border-t-2 border-gray-200">
+                <TableCell
+                  colSpan={3}
+                  className="text-xs font-medium text-gray-800"
+                >
+                  Downline subtotal
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs font-medium">
+                  {fmt(downlineData.reduce((s, d) => s + d.monthlyPO, 0))}
+                </TableCell>
+                <TableCell
+                  className={cn(
+                    "text-right font-mono text-xs font-medium",
+                    downlineUplineTotal < 0
+                      ? "text-danger-600"
+                      : "text-purple-600"
+                  )}
+                >
+                  {fmtSigned(downlineUplineTotal)}
+                </TableCell>
+                <TableCell />
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {(recruits.length > 0 || hasDownlineEarnings) && (
+        <div className="flex items-center justify-between border-t border-purple-200 pt-3 text-xs font-medium">
+          <span className="text-gray-800">Total introducer earnings</span>
+          <span
+            className={cn(
+              "font-mono",
+              introComm < 0 ? "text-danger-600" : "text-purple-600"
+            )}
+          >
+            {fmtSigned(introComm)}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

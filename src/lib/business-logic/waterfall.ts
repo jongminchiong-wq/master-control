@@ -26,6 +26,14 @@ export interface PurchaseOrder {
 export interface Player extends PlayerForTier {
   id: string;
   introducedBy?: string | null;
+  // Upline introducer. When set:
+  //   - chunk size uses the upline's intro tier rate, with the upline's
+  //     band determined by their whole-subtree monthly PO volume
+  //     (every PO from any descendant at any depth).
+  //   - the chunk is split using the direct introducer's tier rate:
+  //     direct keeps `introRate%`, upline gets the remaining
+  //     `1 − introRate%`. Same fractions apply to the loss leg.
+  uplineId?: string | null;
 }
 
 // ── Output type ─────────────────────────────────────────────
@@ -45,6 +53,15 @@ export interface WaterfallResult {
   introAmt: number;
   introRate: number;
   introTier: Tier | null;
+  // Dual-introducer split. `upline` is the introducer's own introducer
+  // (set on the players row as upline_id). When present, the
+  // introducer's chunk is split: direct introducer keeps introRate%,
+  // upline gets (1 − introRate%). Same fractions applied to the loss
+  // leg. When no upline exists, upline is null and uplineAmt /
+  // uplineLossShare are zero — no behaviour change vs single-intro.
+  upline: Player | null;
+  uplineAmt: number;
+  uplineLossShare: number;
   entityShare: number;
   supplierTotal: number;
   riskAdjustedCogs: number;
@@ -60,6 +77,31 @@ export interface WaterfallResult {
   entityLossShare: number;
 }
 
+// Collects every descendant id of `rootId` in the player tree.
+// A player is a descendant if either edge type points up at the
+// current node: `introducedBy` (recruit) or `uplineId` (upline).
+// Both are needed because top-level recruits often have
+// `introducedBy = null` and only carry the upline via `uplineId`
+// (e.g. screenshot setup where B has no introducedBy but uplineId = A).
+// BFS so depth is bounded by the tree, not the JS call stack.
+const collectSubtreeIds = (rootId: string, players: Player[]): Set<string> => {
+  const out = new Set<string>();
+  const queue: string[] = [rootId];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const p of players) {
+      if (
+        (p.introducedBy === cur || p.uplineId === cur) &&
+        !out.has(p.id)
+      ) {
+        out.add(p.id);
+        queue.push(p.id);
+      }
+    }
+  }
+  return out;
+};
+
 // ── The waterfall ───────────────────────────────────────────
 
 export const calcPOWaterfall = (
@@ -73,6 +115,14 @@ export const calcPOWaterfall = (
     eu?.introducedBy
       ? players.find((p) => p.id === eu.introducedBy) ?? null
       : null;
+  // Split trigger is the introducer's own `uplineId` field — not whether the
+  // upline player row is visible in `players`. Client-side callers run under
+  // RLS that may hide the upline (Player B shouldn't see Player A), but B can
+  // still read `upline_id` on their own row, so the split applies correctly.
+  const hasUpline = !!intro?.uplineId;
+  const upline = hasUpline
+    ? players.find((p) => p.id === intro!.uplineId) ?? null
+    : null;
   const poAmount = po.poAmount || 0;
   const deployed = Math.max(0, Math.min(totalDeployed || 0, poAmount));
   const channel = po.channel || "punchout";
@@ -128,11 +178,12 @@ export const calcPOWaterfall = (
 
   // EU Introducer
   let introAmt = 0;
-  let introRate = 0;
+  let introRate = 0;   // direct introducer (B) rate — drives the chunk split
+  let chunkRate = 0;   // rate that SIZES the chunk: upline's rate when present, else B's
   let introTier: Tier | null = null;
   if (intro) {
+    // Direct introducer tier — band by B's direct recruits' POs this month.
     const introTiers = getIntroTiers(intro, channel);
-    // Intro tier based on all recruits' total PO this month
     const recruits = players.filter((p) => p.introducedBy === intro.id);
     const recruitIds = recruits.map((r) => r.id);
     const recruitTotalPO = allPos
@@ -143,17 +194,47 @@ export const calcPOWaterfall = (
       .reduce((s, p) => s + (p.poAmount || 0), 0);
     introTier = getTier(recruitTotalPO || poAmount, introTiers);
     introRate = introTier.rate;
-    introAmt = Math.max(0, entityGross * (introRate / 100));
+    chunkRate = introRate;
+
+    // Upline tier — chunk is sized by the upline's tier rate when an upline
+    // exists. Upline's tier band uses whole-subtree monthly PO volume: every
+    // PO placed by anyone below the upline at any depth. The upline's own
+    // POs are excluded by construction (the upline is not in its own subtree).
+    if (upline) {
+      const uplineTiers = getIntroTiers(upline, channel);
+      const subtreeIds = collectSubtreeIds(upline.id, players);
+      const subtreeTotalPO = allPos
+        .filter(
+          (p) => subtreeIds.has(p.endUserId) && getMonth(p.poDate) === poMonth
+        )
+        .reduce((s, p) => s + (p.poAmount || 0), 0);
+      const uplineTier = getTier(subtreeTotalPO || poAmount, uplineTiers);
+      chunkRate = uplineTier.rate;
+    }
+
+    introAmt = Math.max(0, entityGross * (chunkRate / 100));
   }
 
-  const entityShare = Math.max(0, entityGross - introAmt);
+  // Dual-introducer split. Direct introducer keeps `introRate%` of the chunk;
+  // upline gets `1 − introRate%`. Split fractions are unchanged by the
+  // upline-sized chunk above — only the chunk total grew. When upline is
+  // null, fractions collapse to (1, 0).
+  const uplineShareFrac = hasUpline ? 1 - introRate / 100 : 0;
+  const bobShareFrac = hasUpline ? introRate / 100 : 1;
+  const uplineAmt = introAmt * uplineShareFrac;
+  introAmt = introAmt * bobShareFrac;
+
+  const entityShare = Math.max(0, entityGross - introAmt - uplineAmt);
 
   // Loss split — full pool deficit, mirroring the profit split.
+  // Side total uses `chunkRate` so the loss footprint matches the chunk size.
   const rawLoss = Math.max(0, -pool);
   const playerLossShare = rawLoss * (euTier.rate / 100);
   const sideLoss = rawLoss - playerLossShare;
-  const introducerLossShare = intro ? sideLoss * (introRate / 100) : 0;
-  const entityLossShare = sideLoss - introducerLossShare;
+  const introducerLossSharePre = intro ? sideLoss * (chunkRate / 100) : 0;
+  const uplineLossShare = introducerLossSharePre * uplineShareFrac;
+  const introducerLossShare = introducerLossSharePre * bobShareFrac;
+  const entityLossShare = sideLoss - introducerLossSharePre;
 
   return {
     channel,
@@ -170,6 +251,9 @@ export const calcPOWaterfall = (
     introAmt,
     introRate,
     introTier,
+    upline,
+    uplineAmt,
+    uplineLossShare,
     entityShare,
     supplierTotal,
     riskAdjustedCogs,

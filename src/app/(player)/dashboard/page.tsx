@@ -5,7 +5,6 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
-import { calcPOWaterfall } from "@/lib/business-logic/waterfall";
 import { fmt, fmtSigned, getMonth } from "@/lib/business-logic/formatters";
 import { getCommissionStatus } from "@/lib/business-logic/commission-status";
 
@@ -15,21 +14,16 @@ import { MonthPicker } from "@/components/month-picker";
 import { ArrowRight } from "lucide-react";
 
 import {
-  type DBPlayer,
-  type DBPO,
+  type APICommissionResponse,
   type DBLossDebit,
   type DBCommission,
-  toWaterfallPlayer,
-  toWaterfallPO,
 } from "../_shared";
 import { usePlayerSelectedMonth } from "../_month-context";
 
 export default function PlayerDashboardPage() {
   const supabase = useMemo(() => createClient(), []);
 
-  const [myPlayer, setMyPlayer] = useState<DBPlayer | null>(null);
-  const [allPlayers, setAllPlayers] = useState<DBPlayer[]>([]);
-  const [allPOs, setAllPOs] = useState<DBPO[]>([]);
+  const [data, setData] = useState<APICommissionResponse | null>(null);
   const [lossDebits, setLossDebits] = useState<DBLossDebit[]>([]);
   const [commissionLedger, setCommissionLedger] = useState<DBCommission[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,53 +39,33 @@ export default function PlayerDashboardPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
+    const res = await fetch("/api/player/commission", { cache: "no-store" });
+    if (res.status === 401) {
       setErrorState("not_authenticated");
       setLoading(false);
       return;
     }
-
-    const { data: playerData } = await supabase
-      .from("players")
-      .select("*")
-      .eq("user_id", user.id)
-      .single();
-
-    if (!playerData) {
+    if (res.status === 404 || !res.ok) {
       setErrorState("no_player");
       setLoading(false);
       return;
     }
+    const json = (await res.json()) as APICommissionResponse;
+    setData(json);
 
-    setMyPlayer(playerData);
-
-    const [playersRes, posRes, debitsRes, commsRes] = await Promise.all([
-      supabase
-        .from("players")
-        .select("*")
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("purchase_orders")
-        .select("*, delivery_orders(*)")
-        .order("po_date", { ascending: true }),
+    // Per-player ledger tables still come direct from Supabase (own data via RLS).
+    const [debitsRes, commsRes] = await Promise.all([
       supabase
         .from("player_loss_debits")
         .select("*")
-        .eq("player_id", playerData.id)
+        .eq("player_id", json.me.id)
         .order("cleared_at", { ascending: true }),
       supabase
         .from("player_commissions")
         .select("*")
-        .eq("player_id", playerData.id)
+        .eq("player_id", json.me.id)
         .order("created_at", { ascending: true }),
     ]);
-
-    if (playersRes.data) setAllPlayers(playersRes.data);
-    if (posRes.data) setAllPOs(posRes.data as DBPO[]);
     if (debitsRes.data) setLossDebits(debitsRes.data);
     if (commsRes.data) setCommissionLedger(commsRes.data);
     setLoading(false);
@@ -101,9 +75,14 @@ export default function PlayerDashboardPage() {
     fetchData();
   }, [fetchData]);
 
+  const me = data?.me;
+  const allAPIPOs = data?.pos ?? [];
+  const recruits = data?.recruits ?? [];
+  const downlineRecruits = data?.downlineRecruits ?? [];
+
   const availableMonths = useMemo(() => {
-    const poMonths = allPOs
-      .map((po) => getMonth(po.po_date))
+    const poMonths = allAPIPOs
+      .map((p) => getMonth(p.po.po_date))
       .filter((m): m is string => Boolean(m));
     const anchors = [...poMonths, currentMonth];
     const earliest = anchors.reduce((a, b) => (a < b ? a : b));
@@ -121,84 +100,75 @@ export default function PlayerDashboardPage() {
       }
     }
     return months.reverse();
-  }, [allPOs, currentMonth]);
-
-  const wPlayers = useMemo(
-    () => allPlayers.map(toWaterfallPlayer),
-    [allPlayers]
-  );
-  const wAllPOs = useMemo(() => allPOs.map(toWaterfallPO), [allPOs]);
+  }, [allAPIPOs, currentMonth]);
 
   const myMonthPOs = useMemo(() => {
-    if (!myPlayer) return [];
-    return allPOs.filter(
-      (po) =>
-        po.end_user_id === myPlayer.id &&
-        getMonth(po.po_date) === selectedMonth
+    if (!me) return [];
+    return allAPIPOs.filter(
+      (p) =>
+        p.po.end_user_id === me.id &&
+        getMonth(p.po.po_date) === selectedMonth
     );
-  }, [allPOs, myPlayer, selectedMonth]);
-
-  const myPOData = useMemo(() => {
-    return myMonthPOs.map((po) => {
-      const wPO = toWaterfallPO(po);
-      const w = calcPOWaterfall(wPO, wPlayers, wAllPOs, po.po_amount);
-      return { po, waterfall: w };
-    });
-  }, [myMonthPOs, wPlayers, wAllPOs]);
+  }, [allAPIPOs, me, selectedMonth]);
 
   const myTotalPO = useMemo(
-    () => myMonthPOs.reduce((s, po) => s + po.po_amount, 0),
+    () => myMonthPOs.reduce((s, p) => s + p.po.po_amount, 0),
     [myMonthPOs]
   );
 
   const myEUComm = useMemo(
     () =>
-      myPOData.reduce(
-        (s, d) => s + d.waterfall.euAmt - d.waterfall.playerLossShare,
+      myMonthPOs.reduce(
+        (s, p) => s + p.waterfall.euAmt - p.waterfall.playerLossShare,
         0
       ),
-    [myPOData]
+    [myMonthPOs]
   );
 
   const clearedEUComm = useMemo(
     () =>
-      myPOData
-        .filter((d) => d.po.commissions_cleared)
+      myMonthPOs
+        .filter((p) => p.po.commissions_cleared)
         .reduce(
-          (s, d) => s + d.waterfall.euAmt - d.waterfall.playerLossShare,
+          (s, p) => s + p.waterfall.euAmt - p.waterfall.playerLossShare,
           0
         ),
-    [myPOData]
+    [myMonthPOs]
   );
 
   const pendingEUComm = myEUComm - clearedEUComm;
 
-  const recruits = useMemo(() => {
-    if (!myPlayer) return [];
-    return allPlayers.filter((p) => p.introduced_by === myPlayer.id);
-  }, [allPlayers, myPlayer]);
+  const recruitIds = useMemo(
+    () => new Set(recruits.map((r) => r.id)),
+    [recruits]
+  );
+  const uplineRecruitIds = useMemo(
+    () => new Set(downlineRecruits.map((r) => r.id)),
+    [downlineRecruits]
+  );
 
   const introTotals = useMemo(() => {
-    if (recruits.length === 0)
+    if (recruitIds.size === 0 && uplineRecruitIds.size === 0)
       return { earned: 0, cleared: 0 };
-    const recruitIds = new Set(recruits.map((r) => r.id));
     let earned = 0;
     let cleared = 0;
-    for (const po of allPOs) {
-      if (!recruitIds.has(po.end_user_id)) continue;
-      if (getMonth(po.po_date) !== selectedMonth) continue;
-      const w = calcPOWaterfall(
-        toWaterfallPO(po),
-        wPlayers,
-        wAllPOs,
-        po.po_amount
-      );
-      const net = w.introAmt - w.introducerLossShare;
+    for (const p of allAPIPOs) {
+      const isDirectRecruit = recruitIds.has(p.po.end_user_id);
+      const isUplineSlice = uplineRecruitIds.has(p.po.end_user_id);
+      if (!isDirectRecruit && !isUplineSlice) continue;
+      if (getMonth(p.po.po_date) !== selectedMonth) continue;
+      const net =
+        (isDirectRecruit
+          ? p.waterfall.introAmt - p.waterfall.introducerLossShare
+          : 0) +
+        (isUplineSlice
+          ? p.waterfall.uplineAmt - p.waterfall.uplineLossShare
+          : 0);
       earned += net;
-      if (getCommissionStatus(po) === "cleared") cleared += net;
+      if (getCommissionStatus(p.po) === "cleared") cleared += net;
     }
     return { earned, cleared };
-  }, [allPOs, recruits, selectedMonth, wPlayers, wAllPOs]);
+  }, [allAPIPOs, recruitIds, uplineRecruitIds, selectedMonth]);
 
   const totalIntroComm = introTotals.earned;
   const clearedIntroComm = introTotals.cleared;
@@ -218,46 +188,42 @@ export default function PlayerDashboardPage() {
   const outstandingCarry = Math.max(0, lifetimeDebits - lifetimeCommissions);
 
   const myAllTimePOs = useMemo(() => {
-    if (!myPlayer) return [];
-    return allPOs.filter((po) => po.end_user_id === myPlayer.id);
-  }, [allPOs, myPlayer]);
+    if (!me) return [];
+    return allAPIPOs.filter((p) => p.po.end_user_id === me.id);
+  }, [allAPIPOs, me]);
 
   const lifetimeEUTotals = useMemo(() => {
     let earned = 0;
     let pending = 0;
-    for (const po of myAllTimePOs) {
-      const w = calcPOWaterfall(
-        toWaterfallPO(po),
-        wPlayers,
-        wAllPOs,
-        po.po_amount
-      );
-      const net = w.euAmt - w.playerLossShare;
+    for (const p of myAllTimePOs) {
+      const net = p.waterfall.euAmt - p.waterfall.playerLossShare;
       earned += net;
-      if (!po.commissions_cleared) pending += net;
+      if (!p.po.commissions_cleared) pending += net;
     }
     return { earned, pending };
-  }, [myAllTimePOs, wPlayers, wAllPOs]);
+  }, [myAllTimePOs]);
 
   const lifetimeIntroTotals = useMemo(() => {
     let earned = 0;
     let pending = 0;
-    if (recruits.length === 0) return { earned, pending };
-    const recruitIds = new Set(recruits.map((r) => r.id));
-    for (const po of allPOs) {
-      if (!recruitIds.has(po.end_user_id)) continue;
-      const w = calcPOWaterfall(
-        toWaterfallPO(po),
-        wPlayers,
-        wAllPOs,
-        po.po_amount
-      );
-      const net = w.introAmt - w.introducerLossShare;
+    if (recruitIds.size === 0 && uplineRecruitIds.size === 0)
+      return { earned, pending };
+    for (const p of allAPIPOs) {
+      const isDirectRecruit = recruitIds.has(p.po.end_user_id);
+      const isUplineSlice = uplineRecruitIds.has(p.po.end_user_id);
+      if (!isDirectRecruit && !isUplineSlice) continue;
+      const net =
+        (isDirectRecruit
+          ? p.waterfall.introAmt - p.waterfall.introducerLossShare
+          : 0) +
+        (isUplineSlice
+          ? p.waterfall.uplineAmt - p.waterfall.uplineLossShare
+          : 0);
       earned += net;
-      if (!po.commissions_cleared) pending += net;
+      if (!p.po.commissions_cleared) pending += net;
     }
     return { earned, pending };
-  }, [allPOs, recruits, wPlayers, wAllPOs]);
+  }, [allAPIPOs, recruitIds, uplineRecruitIds]);
 
   const lifetimeEarned = lifetimeEUTotals.earned + lifetimeIntroTotals.earned;
   const lifetimePending = Math.max(
@@ -283,7 +249,7 @@ export default function PlayerDashboardPage() {
     );
   }
 
-  if (errorState === "no_player" || !myPlayer) {
+  if (errorState === "no_player" || !me) {
     return (
       <div className="flex min-h-[400px] items-center justify-center">
         <div className="text-center">

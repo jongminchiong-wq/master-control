@@ -9,8 +9,10 @@ import {
   PO_EU_C_EXCLUSIVE,
   PO_INTRO,
   PO_INTRO_EXCLUSIVE,
+  PO_INTRO_A_PLUS,
   PO_INTRO_B,
   GEP_INTRO_B,
+  GEP_INTRO_A_PLUS,
   INV_INTRO_TIERS,
 } from "./constants";
 
@@ -51,12 +53,14 @@ export const getEUTiers = (
 // Punchout introducer tables keyed by mode.
 const PUNCHOUT_INTRO_TIERS: Record<string, Tier[]> = {
   A: PO_INTRO,
+  A_PLUS: PO_INTRO_A_PLUS,
   B: PO_INTRO_EXCLUSIVE,
 };
 
 // GEP introducer tables keyed by mode.
 const GEP_INTRO_TIERS: Record<string, Tier[]> = {
   A: PO_INTRO_B,
+  A_PLUS: GEP_INTRO_A_PLUS,
   B: GEP_INTRO_B,
 };
 

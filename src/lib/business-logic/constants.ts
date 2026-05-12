@@ -92,6 +92,15 @@ export const PO_INTRO_EXCLUSIVE: Tier[] = [
   { name: "Elite", rate: 36, min: 400001, max: Infinity },
 ];
 
+// ── EU Introducer Tiers — Punchout channel (Premium) ────────
+
+export const PO_INTRO_A_PLUS: Tier[] = [
+  { name: "Base", rate: 30, min: 0, max: 100000 },
+  { name: "Active", rate: 33, min: 100001, max: 200000 },
+  { name: "Pro", rate: 36, min: 200001, max: 400000 },
+  { name: "Elite", rate: 39, min: 400001, max: Infinity },
+];
+
 // ── EU Introducer Tiers — GEP channel A ─────────────────────
 
 export const PO_INTRO_B: Tier[] = [
@@ -108,6 +117,15 @@ export const GEP_INTRO_B: Tier[] = [
   { name: "Active", rate: 30, min: 100001, max: 200000 },
   { name: "Pro", rate: 33, min: 200001, max: 400000 },
   { name: "Elite", rate: 36, min: 400001, max: Infinity },
+];
+
+// ── EU Introducer Tiers — GEP channel (Premium) ─────────────
+
+export const GEP_INTRO_A_PLUS: Tier[] = [
+  { name: "Base", rate: 30, min: 0, max: 100000 },
+  { name: "Active", rate: 33, min: 100001, max: 200000 },
+  { name: "Pro", rate: 36, min: 200001, max: 400000 },
+  { name: "Elite", rate: 39, min: 400001, max: Infinity },
 ];
 
 // ── Investor Introducer Tiers (Combine tab only) ────────────

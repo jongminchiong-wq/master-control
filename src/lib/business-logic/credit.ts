@@ -322,6 +322,24 @@ export async function creditPlayerCommissions({
       w.introTier.rate,
       w.entityGross,
     );
+
+    // Dual-intro: persist the upline's slice as a separate intro row.
+    // Same po_id, different player_id, so the
+    // UNIQUE(player_id, po_id, type) WHERE NOT is_split index allows
+    // both rows to coexist. Tier_rate stored as the upline's effective
+    // rate of the chunk (100 − Bob's rate); base_amount stored as the
+    // chunk size, so tier_rate × base_amount / 100 = uplineAmt
+    // reconciles for audit.
+    if (w.upline && w.uplineAmt > 0) {
+      const chunkSize = w.entityGross * (w.introTier.rate / 100);
+      await credit(
+        w.upline.id,
+        "intro",
+        w.uplineAmt,
+        100 - w.introTier.rate,
+        chunkSize,
+      );
+    }
   }
 
   return result;
@@ -422,6 +440,23 @@ export async function creditPlayerLossDebits({
       w.rawLoss - w.playerLossShare,
       po.endUserId,
     );
+
+    // Dual-intro: the upline absorbs the other side of the introducer
+    // loss leg, mirroring the profit-side credit. tier_rate stored as
+    // the effective upline rate; base_amount is the chunk loss before
+    // it was split between Bob and Alice.
+    if (w.upline && w.uplineLossShare > 0) {
+      const sideLoss = w.rawLoss - w.playerLossShare;
+      const chunkLoss = sideLoss * (w.introTier.rate / 100);
+      await debit(
+        w.upline.id,
+        "intro",
+        w.uplineLossShare,
+        100 - w.introTier.rate,
+        chunkLoss,
+        po.endUserId,
+      );
+    }
   }
 
   return result;

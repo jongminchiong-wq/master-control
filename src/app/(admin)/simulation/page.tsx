@@ -13,8 +13,10 @@ import {
   PO_EU_C_EXCLUSIVE,
   PO_INTRO,
   PO_INTRO_EXCLUSIVE,
+  PO_INTRO_A_PLUS,
   PO_INTRO_B,
   GEP_INTRO_B,
+  GEP_INTRO_A_PLUS,
   INV_INTRO_TIERS,
   BUFFER_TABLE,
   RB_PO_TIERS,
@@ -28,12 +30,24 @@ import { fmt } from "@/lib/business-logic/formatters";
 
 type EUProxyMode = "A" | "A_PLUS" | "B";
 type EUGridMode = "A" | "B";
-type IntroMode = "A" | "B";
+type IntroMode = "A" | "A_PLUS" | "B";
 
 const PUNCHOUT_EU_TABLES: Record<EUProxyMode, Tier[]> = {
   A: PO_EU_A,
   A_PLUS: PO_EU_A_PLUS,
   B: PO_EU_B,
+};
+
+const PUNCHOUT_INTRO_TABLES: Record<IntroMode, Tier[]> = {
+  A: PO_INTRO,
+  A_PLUS: PO_INTRO_A_PLUS,
+  B: PO_INTRO_EXCLUSIVE,
+};
+
+const GEP_INTRO_TABLES: Record<IntroMode, Tier[]> = {
+  A: PO_INTRO_B,
+  A_PLUS: GEP_INTRO_A_PLUS,
+  B: GEP_INTRO_B,
 };
 
 const ratesLabel = (tiers: Tier[]) =>
@@ -272,7 +286,7 @@ export default function SimulationPage() {
   // Deal variables
   const [monthlyPOVol, setMonthlyPOVol] = useState(100000);
   const [cogsPercent, setCogsPercent] = useState(80);
-  const [riskBufferKey, setRiskBufferKey] = useState<RiskBufferKey>("mid2:sea");
+  const [riskBufferKey, setRiskBufferKey] = useState<RiskBufferKey>("mid1:local");
 
   // Investor
   const [invTierIdx, setInvTierIdx] = useState(2); // default Gold (5%)
@@ -317,12 +331,8 @@ export default function SimulationPage() {
 
     // Introducer tier — each channel reads its own mode independently.
     const INTRO_TIERS_PO: Tier[] = punchoutOn
-      ? introTierModeProxy === "B"
-        ? PO_INTRO_EXCLUSIVE
-        : PO_INTRO
-      : introTierModeGrid === "B"
-        ? GEP_INTRO_B
-        : PO_INTRO_B;
+      ? PUNCHOUT_INTRO_TABLES[introTierModeProxy]
+      : GEP_INTRO_TABLES[introTierModeGrid];
     const introTier = getTier(totalGroupPO, INTRO_TIERS_PO);
     const introducerPct = introTier.rate;
 
@@ -354,6 +364,7 @@ export default function SimulationPage() {
     // Entity net
     const entityBeforeOpex = afterEUIntro - invIntroAmt;
     const entityNet = entityBeforeOpex - monthlyOpex;
+    const entityTotalWithBuffer = entityNet + riskBufferAmt;
     const poolHealthy = pool > 0;
 
     return {
@@ -387,6 +398,7 @@ export default function SimulationPage() {
       invIntroAmt,
       entityBeforeOpex,
       entityNet,
+      entityTotalWithBuffer,
       poolHealthy,
     };
   }, [
@@ -591,6 +603,7 @@ export default function SimulationPage() {
                   onChange={setIntroTierModeProxy}
                   options={[
                     { value: "A", label: "Default", sublabel: ratesLabel(PO_INTRO), activeText: "text-purple-600" },
+                    { value: "A_PLUS", label: "Premium", sublabel: ratesLabel(PO_INTRO_A_PLUS), activeText: "text-purple-600" },
                     { value: "B", label: "Exclusive", sublabel: ratesLabel(PO_INTRO_EXCLUSIVE), activeText: "text-purple-600" },
                   ]}
                 />
@@ -600,6 +613,7 @@ export default function SimulationPage() {
                   onChange={setIntroTierModeGrid}
                   options={[
                     { value: "A", label: "Default", sublabel: ratesLabel(PO_INTRO_B), activeText: "text-purple-600" },
+                    { value: "A_PLUS", label: "Premium", sublabel: ratesLabel(GEP_INTRO_A_PLUS), activeText: "text-purple-600" },
                     { value: "B", label: "Exclusive", sublabel: ratesLabel(GEP_INTRO_B), activeText: "text-purple-600" },
                   ]}
                 />
@@ -719,12 +733,12 @@ export default function SimulationPage() {
 
         {/* ═══ RIGHT PANEL — Waterfall Results ═══ */}
         <div className="space-y-4">
-          {/* Hero — Entity net */}
+          {/* Hero — Entity total earnings (net + retained risk buffer) */}
           <MetricCard
-            label="Entity net (monthly)"
-            value={fmt(calc.entityNet)}
-            subtitle={`After ${calc.monthlyOpex > 0 ? "OPEX & " : ""}both introducers`}
-            color={calc.entityNet < 0 ? "danger" : "success"}
+            label="Entity total earnings (incl. risk buffer)"
+            value={fmt(calc.entityTotalWithBuffer)}
+            subtitle={`Entity net + ${fmt(calc.riskBufferAmt)} risk buffer retained if no overrun`}
+            color={calc.entityTotalWithBuffer < 0 ? "danger" : "success"}
           />
 
           {/* Monthly waterfall hero */}
@@ -738,21 +752,6 @@ export default function SimulationPage() {
               label="Total group PO"
               value={fmt(calc.totalGroupPO)}
               subtitle={`${numEndUsers} player${numEndUsers > 1 ? "s" : ""} x ${fmt(monthlyPOVol)}`}
-            />
-
-            {/* Gross profit */}
-            <MetricCard
-              label="Gross profit"
-              value={fmt(calc.grossProfit)}
-              color="success"
-            />
-
-            {/* Pool */}
-            <MetricCard
-              label={`Pool (Gross${punchoutOn ? " - P" : ""} - Investor)`}
-              value={fmt(calc.pool)}
-              subtitle={`Split between player (${calc.endUserRate}%) and entity (${100 - calc.endUserRate}%)`}
-              color={calc.pool > 0 ? "accent" : "danger"}
             />
 
             {!calc.poolHealthy && (

@@ -585,6 +585,8 @@ export type Database = {
           intro_tier_mode_proxy: string
           introduced_by: string | null
           name: string
+          sub_introducer_id: string | null
+          upline_id: string | null
           user_id: string | null
         }
         Insert: {
@@ -596,6 +598,8 @@ export type Database = {
           intro_tier_mode_proxy?: string
           introduced_by?: string | null
           name: string
+          sub_introducer_id?: string | null
+          upline_id?: string | null
           user_id?: string | null
         }
         Update: {
@@ -607,12 +611,28 @@ export type Database = {
           intro_tier_mode_proxy?: string
           introduced_by?: string | null
           name?: string
+          sub_introducer_id?: string | null
+          upline_id?: string | null
           user_id?: string | null
         }
         Relationships: [
           {
             foreignKeyName: "players_introduced_by_fkey"
             columns: ["introduced_by"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "players_sub_introducer_id_fkey"
+            columns: ["sub_introducer_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "players_upline_id_fkey"
+            columns: ["upline_id"]
             isOneToOne: false
             referencedRelation: "players"
             referencedColumns: ["id"]
@@ -985,6 +1005,8 @@ export type Database = {
         }
         Returns: Json
       }
+      get_my_commission_dataset: { Args: never; Returns: Json }
+      get_my_downline_chain_ids: { Args: never; Returns: string[] }
       get_my_player_ids: { Args: never; Returns: string[] }
       get_my_recruit_ids: { Args: never; Returns: string[] }
       mark_player_withdrawal_paid: {

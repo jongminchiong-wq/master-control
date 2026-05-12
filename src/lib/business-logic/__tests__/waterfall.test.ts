@@ -504,4 +504,343 @@ const recruit: Player = {
   console.log("✓ T14: Other Cost overrun feeds existing loss-split path");
 }
 
+// ── Test 15: Dual introducer — profit split at Base 24% ───────
+// Bob has uplineId = Alice. Carol's PO drives the chain
+// Entity → Alice → Bob → Carol. Chunk is sized by Alice's tier
+// (whole-subtree volume = 60k → PO_INTRO Base 24%). Both Alice
+// and Bob land at Base 24% so the chunk equals the legacy
+// single-intro chunk; the split (Bob 24% / Alice 76%) uses Bob's
+// own rate.
+{
+  const alice: Player = {
+    id: "ALICE",
+    euTierModeProxy: "A",
+    euTierModeGrid: "A",
+    introTierModeProxy: "A",
+    introTierModeGrid: "A",
+    introducedBy: null,
+  };
+  const bob: Player = {
+    id: "BOB",
+    euTierModeProxy: "A",
+    euTierModeGrid: "A",
+    introTierModeProxy: "A",
+    introTierModeGrid: "A",
+    introducedBy: null,
+    uplineId: "ALICE",
+  };
+  const carol: Player = {
+    id: "CAROL",
+    euTierModeProxy: "A",
+    euTierModeGrid: "A",
+    introTierModeProxy: "A",
+    introTierModeGrid: "A",
+    introducedBy: "BOB",
+  };
+  const po: PurchaseOrder = {
+    id: "PO15",
+    endUserId: "CAROL",
+    poAmount: 60000,
+    poDate: "2026-03-15",
+    channel: "punchout",
+    dos: [{ amount: 40000, delivery: "local" }],
+  };
+  const w = calcPOWaterfall(po, [alice, bob, carol], [po], 60000);
+
+  // pool 14,600 (same as T5 single PO scenario)
+  // euAmt = 14,600 × 0.24 = 3,504 (Carol's monthlyCumulative = 60k → Base)
+  // entityGross = 14,600 − 3,504 = 11,096
+  // Alice's subtree = {Bob, Carol}. POs this month from subtree = 60k.
+  //   Alice's tier = PO_INTRO Base 24% → chunkRate = 24%
+  // Bob recruits total this month = 60k → Base 24% → introRate = 24%
+  // chunk = 11,096 × 0.24 = 2,663.04
+  // Bob keeps chunk × 0.24 = 639.13; Alice gets chunk × 0.76 = 2,023.91
+  close(w.pool, 14600, "T15 pool");
+  close(w.euAmt, 3504, "T15 euAmt");
+  close(w.entityGross, 11096, "T15 entityGross");
+  close(w.introAmt + w.uplineAmt, 2663.04, "T15 chunk preserved");
+  close(w.introAmt, 639.1296, "T15 Bob keeps introRate% of chunk");
+  close(w.uplineAmt, 2023.9104, "T15 Alice gets (1 − introRate%) of chunk");
+  assert.equal(w.upline?.id, "ALICE", "T15 upline resolved");
+  assert.equal(w.intro?.id, "BOB", "T15 direct intro resolved");
+  assert.equal(w.introRate, 24, "T15 Bob Base 24%");
+  console.log("✓ T15: Dual intro profit split — Bob Base 24% / Alice 76%");
+}
+
+// ── Test 16: Dual introducer — loss split mirrors profit ──────
+// Same chain, but supplier 55k local pushes pool negative. The
+// rawLoss must distribute: player 24% of rawLoss, then the side
+// loss is sized by chunkRate (Alice's rate) and split 24/76
+// between Bob and Alice. Alice and Bob both at Base 24% here so
+// chunkRate = introRate. All four loss shares must sum to rawLoss.
+{
+  const alice: Player = {
+    id: "ALICE",
+    euTierModeProxy: "A",
+    euTierModeGrid: "A",
+    introTierModeProxy: "A",
+    introTierModeGrid: "A",
+    introducedBy: null,
+  };
+  const bob: Player = {
+    id: "BOB",
+    euTierModeProxy: "A",
+    euTierModeGrid: "A",
+    introTierModeProxy: "A",
+    introTierModeGrid: "A",
+    introducedBy: null,
+    uplineId: "ALICE",
+  };
+  const carol: Player = {
+    id: "CAROL",
+    euTierModeProxy: "A",
+    euTierModeGrid: "A",
+    introTierModeProxy: "A",
+    introTierModeGrid: "A",
+    introducedBy: "BOB",
+  };
+  const po: PurchaseOrder = {
+    id: "PO16",
+    endUserId: "CAROL",
+    poAmount: 50000,
+    poDate: "2026-04-15",
+    channel: "punchout",
+    dos: [{ amount: 55000, delivery: "local" }],
+  };
+  const w = calcPOWaterfall(po, [alice, bob, carol], [po], 50000);
+
+  // rawLoss = 9,550 (matches T10). EU Base 24% → player 2,292;
+  // sideLoss 7,258; introducerLossSharePre = 7,258 × 0.24 = 1,741.92
+  // Bob 1,741.92 × 0.24 = 418.0608; Alice 1,741.92 × 0.76 = 1,323.8592
+  // entityLossShare unchanged = sideLoss − introducerLossSharePre = 5,516.08
+  close(w.rawLoss, 9550, "T16 rawLoss");
+  close(w.playerLossShare, 2292, "T16 playerLossShare");
+  close(w.introducerLossShare, 418.0608, "T16 Bob loss share");
+  close(w.uplineLossShare, 1323.8592, "T16 Alice loss share");
+  close(w.entityLossShare, 5516.08, "T16 entityLossShare unchanged");
+  // Loss invariant: all four shares sum to rawLoss exactly
+  close(
+    w.playerLossShare +
+      w.introducerLossShare +
+      w.uplineLossShare +
+      w.entityLossShare,
+    w.rawLoss,
+    "T16 four-way loss shares sum to rawLoss"
+  );
+  console.log("✓ T16: Dual intro loss split — same fractions");
+}
+
+// ── Test 17: No upline — output identical to single-intro path ─
+// Bob.uplineId = null. Output must match T5 byte-for-byte on the
+// affected fields. Regression guard for backward compatibility.
+{
+  const w = calcPOWaterfall(
+    {
+      id: "PO17",
+      endUserId: "REC",
+      poAmount: 60000,
+      poDate: "2026-03-20",
+      channel: "punchout",
+      dos: [{ amount: 40000, delivery: "local" }],
+    },
+    [introducer, recruit],
+    [
+      {
+        id: "PO17a",
+        endUserId: "REC",
+        poAmount: 60000,
+        poDate: "2026-03-10",
+        channel: "punchout",
+        dos: [{ amount: 40000, delivery: "local" }],
+      },
+      {
+        id: "PO17",
+        endUserId: "REC",
+        poAmount: 60000,
+        poDate: "2026-03-20",
+        channel: "punchout",
+        dos: [{ amount: 40000, delivery: "local" }],
+      },
+    ],
+    60000
+  );
+
+  // Bob has no uplineId → introAmt unchanged from T5 (2,877.66)
+  close(w.introAmt, 2877.66, "T17 introAmt unchanged");
+  close(w.uplineAmt, 0, "T17 uplineAmt zero with no upline");
+  close(w.uplineLossShare, 0, "T17 uplineLossShare zero with no upline");
+  assert.equal(w.upline, null, "T17 upline null");
+  console.log("✓ T17: No upline — single-intro behaviour preserved");
+}
+
+// ── Test 18: Chunk uses upline's tier when it differs from direct ─
+// Locks the rule: chunk size comes from the upline's intro tier
+// (banded by the upline's whole-subtree monthly PO volume), and
+// the split still uses the direct introducer's rate.
+//
+// Setup mirrors the PRX-001 production case:
+//   Alice intro_tier_mode_proxy = A_PLUS  (PO_INTRO_A_PLUS)
+//   Bob   intro_tier_mode_proxy = A       (PO_INTRO)
+//   Carol places 10k Punchout PO, no DOs (cogs = 0)
+//
+// Expected:
+//   pool       = 10,000 − 300 (3% platform) − 500 (5% investor) = 9,200
+//   euAmt      = 9,200 × 24%  = 2,208      (Carol Base 24%)
+//   entityGross= 9,200 − 2,208 = 6,992
+//
+//   Alice subtree = {Bob, Carol}. POs this month = 10k (Carol).
+//   Alice band   = PO_INTRO_A_PLUS Base 30% → chunkRate = 30%
+//   Bob recruits = {Carol}. POs = 10k → PO_INTRO Base 24% → introRate = 24%
+//
+//   chunk      = 6,992 × 30%  = 2,097.60
+//   Bob keeps  = 2,097.60 × 24% =   503.424
+//   Alice gets = 2,097.60 × 76% = 1,594.176
+//   entityShare= 6,992 − 2,097.60 = 4,894.40
+{
+  const alice: Player = {
+    id: "ALICE",
+    euTierModeProxy: "A",
+    euTierModeGrid: "A",
+    introTierModeProxy: "A_PLUS",
+    introTierModeGrid: "A_PLUS",
+    introducedBy: null,
+  };
+  const bob: Player = {
+    id: "BOB",
+    euTierModeProxy: "A",
+    euTierModeGrid: "A",
+    introTierModeProxy: "A",
+    introTierModeGrid: "A",
+    introducedBy: null,
+    uplineId: "ALICE",
+  };
+  const carol: Player = {
+    id: "CAROL",
+    euTierModeProxy: "A",
+    euTierModeGrid: "A",
+    introTierModeProxy: "A",
+    introTierModeGrid: "A",
+    introducedBy: "BOB",
+  };
+  const po: PurchaseOrder = {
+    id: "PO18",
+    endUserId: "CAROL",
+    poAmount: 10000,
+    poDate: "2026-02-08",
+    channel: "punchout",
+  };
+  const w = calcPOWaterfall(po, [alice, bob, carol], [po], 10000);
+
+  close(w.pool, 9200, "T18 pool");
+  close(w.euAmt, 2208, "T18 euAmt");
+  close(w.entityGross, 6992, "T18 entityGross");
+  close(w.introAmt + w.uplineAmt, 2097.6, "T18 chunk sized by Alice 30%");
+  close(w.introAmt, 503.424, "T18 Bob keeps 24% of chunk");
+  close(w.uplineAmt, 1594.176, "T18 Alice gets 76% of chunk");
+  close(w.entityShare, 4894.4, "T18 entityShare drops by upline uplift");
+  assert.equal(w.introRate, 24, "T18 introRate is Bob's rate (split)");
+  assert.equal(w.introTier?.name, "Base", "T18 Bob band");
+  assert.equal(w.upline?.id, "ALICE", "T18 upline resolved");
+  console.log("✓ T18: Chunk sized by upline's A_PLUS tier, split by direct's A");
+}
+
+// ── Test 19: Upline subtree walks BOTH introducedBy and uplineId ──
+// Production tree shape (from PRX-001 screenshot 4):
+//   A — root
+//   B — introducedBy=null, uplineId=A      (B is in A's tree via uplineId)
+//   C, D — introducedBy=B                  (in B's tree via introducedBy)
+//
+// For PRX-001: intro=B (C.introducedBy), upline=A (B.uplineId).
+// A's subtree must include B (uplineId edge) AND C, D (introducedBy
+// edges below B). If BFS only walked introducedBy, A's subtree would
+// be empty — A would fall back to poAmount.
+//
+// This test stresses the BFS by putting a deep descendant (Dave) and
+// asserting Bob's subtree walks 2 levels via mixed edges.
+{
+  const alice: Player = {
+    id: "ALICE",
+    euTierModeProxy: "A",
+    euTierModeGrid: "A",
+    introTierModeProxy: "A_PLUS",
+    introTierModeGrid: "A_PLUS",
+    introducedBy: null,
+  };
+  const bob: Player = {
+    id: "BOB",
+    euTierModeProxy: "A",
+    euTierModeGrid: "A",
+    introTierModeProxy: "A",
+    introTierModeGrid: "A",
+    introducedBy: null,
+    uplineId: "ALICE",
+  };
+  const carol: Player = {
+    id: "CAROL",
+    euTierModeProxy: "A",
+    euTierModeGrid: "A",
+    introTierModeProxy: "A",
+    introTierModeGrid: "A",
+    introducedBy: "BOB",
+    uplineId: "BOB", // makes Bob the upline for Carol's recruits' POs
+  };
+  const dave: Player = {
+    id: "DAVE",
+    euTierModeProxy: "A",
+    euTierModeGrid: "A",
+    introTierModeProxy: "A",
+    introTierModeGrid: "A",
+    introducedBy: "CAROL",
+  };
+
+  // Carol places one 60k PO; Dave places another 60k PO. Bob's
+  // subtree spans both via different edge types: Carol via
+  // (uplineId=BOB OR introducedBy=BOB), Dave via introducedBy=CAROL
+  // chained from Bob's subtree.
+  const carolPO: PurchaseOrder = {
+    id: "PO19a",
+    endUserId: "CAROL",
+    poAmount: 60000,
+    poDate: "2026-02-10",
+    channel: "punchout",
+  };
+  const davePO: PurchaseOrder = {
+    id: "PO19b",
+    endUserId: "DAVE",
+    poAmount: 60000,
+    poDate: "2026-02-15",
+    channel: "punchout",
+  };
+  const w = calcPOWaterfall(
+    davePO,
+    [alice, bob, carol, dave],
+    [carolPO, davePO],
+    60000
+  );
+
+  // For davePO: intro=Carol, upline=Bob (Carol.uplineId).
+  // Bob's subtree walked deep = {Carol, Dave}. Subtree PO this
+  // month = 60k + 60k = 120k → PO_INTRO Active (100k-200k) = 27%
+  // → chunkRate = 27%.
+  // Carol's direct recruits = {Dave}, POs = 60k → PO_INTRO Base
+  // 24% → introRate = 24%.
+  //
+  // Dave monthlyCumulative (punchout) = 60k → EU-A Base 24%.
+  // pool = 60k − 0 cogs − 1,800 platform − 3,000 investor = 55,200
+  // euAmt = 55,200 × 24% = 13,248; entityGross = 41,952
+  // chunk = 41,952 × 27% = 11,327.04
+  // Carol keeps 24% of chunk = 2,718.4896
+  // Bob gets 76% of chunk = 8,608.5504
+  close(w.pool, 55200, "T19 pool");
+  close(w.euAmt, 13248, "T19 euAmt");
+  close(w.entityGross, 41952, "T19 entityGross");
+  close(w.introAmt + w.uplineAmt, 11327.04, "T19 chunk uses Bob's Active 27%");
+  close(w.introAmt, 2718.4896, "T19 Carol keeps 24% of chunk");
+  close(w.uplineAmt, 8608.5504, "T19 Bob gets 76% of chunk");
+  assert.equal(w.upline?.id, "BOB", "T19 upline is Bob");
+  assert.equal(w.intro?.id, "CAROL", "T19 direct intro is Carol");
+  assert.equal(w.introRate, 24, "T19 introRate is Carol's Base 24%");
+  console.log("✓ T19: BFS walks BOTH introducedBy and uplineId edges deep");
+}
+
 console.log("\nAll waterfall tests passed.");

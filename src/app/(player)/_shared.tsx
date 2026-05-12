@@ -19,6 +19,51 @@ export type DBPO = Tables<"purchase_orders"> & {
 export type DBLossDebit = Tables<"player_loss_debits">;
 export type DBCommission = Tables<"player_commissions">;
 
+// ── /api/player/commission response types ───────────────────
+// Mirrors what the server-side waterfall ships back. The server
+// computes the math against the full upline scope (RLS-bypassing
+// SECURITY DEFINER fetch) so the player browser never has to.
+
+export type APIWaterfall = {
+  channel: string;
+  poAmount: number;
+  euTier: { name: string; rate: number };
+  euAmt: number;
+  playerLossShare: number;
+  gross: number;
+  platformFee: number;
+  investorFee: number;
+  pool: number;
+  introAmt: number;
+  introRate: number;
+  introTier: { name: string; rate: number } | null;
+  introducerLossShare: number;
+  uplineAmt: number;
+  uplineLossShare: number;
+  entityShare: number;
+  entityLossShare: number;
+  monthlyCumulative: number;
+  effectiveCogsPct: number;
+  rawLoss: number;
+  supplierTotal: number;
+  riskAdjustedCogs: number;
+  otherCost: number;
+  totalDeployed: number;
+};
+
+export type APIPO = {
+  po: DBPO;
+  waterfall: APIWaterfall;
+};
+
+export type APICommissionResponse = {
+  me: { id: string; name: string };
+  recruits: Array<{ id: string; name: string }>;
+  downlines: Array<{ id: string; name: string }>;
+  downlineRecruits: Array<{ id: string; name: string; downlineId: string }>;
+  pos: APIPO[];
+};
+
 // ── DB → Business-logic mappers ─────────────────────────────
 
 export function toWaterfallPlayer(p: DBPlayer): WaterfallPlayer {
@@ -29,6 +74,7 @@ export function toWaterfallPlayer(p: DBPlayer): WaterfallPlayer {
     introTierModeProxy: p.intro_tier_mode_proxy,
     introTierModeGrid: p.intro_tier_mode_grid,
     introducedBy: p.introduced_by,
+    uplineId: p.upline_id,
   };
 }
 
@@ -400,6 +446,92 @@ export function SimplifiedIntroCommission({
           )}
         >
           {fmtSigned(commission)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── Simplified upline-slice breakdown ───────────────────────
+
+export function SimplifiedUplineCommission({
+  poAmount,
+  pool,
+  introChunk,
+  directSlice,
+  uplineSlice,
+  directTierName,
+  directTierRate,
+}: {
+  poAmount: number;
+  pool: number;
+  // Unclamped intro chunk magnitude: in profit, introAmt + uplineAmt; in
+  // loss, introducerLossShare + uplineLossShare.
+  introChunk: number;
+  // Net direct introducer slice: introAmt - introducerLossShare.
+  directSlice: number;
+  // Net upline slice: uplineAmt - uplineLossShare.
+  uplineSlice: number;
+  directTierName: string;
+  directTierRate: number;
+}) {
+  const costsDeducted = poAmount - pool;
+  const isLoss = uplineSlice < 0;
+  return (
+    <div className="rounded-lg border border-purple-100 bg-purple-50/30 px-5 py-4">
+      <p className="mb-3 text-[10px] font-medium uppercase tracking-wide text-gray-500">
+        How your upline slice is calculated
+      </p>
+      <div className="flex items-baseline justify-between border-b border-gray-200 py-1.5">
+        <span className="text-xs font-medium text-gray-800">PO Amount</span>
+        <span className="font-mono text-xs font-medium text-gray-800">
+          {fmt(poAmount)}
+        </span>
+      </div>
+      <div className="flex items-baseline justify-between border-b border-gray-200 py-1.5">
+        <span className="text-xs text-gray-600">
+          Total cost — supplier COGS, risk buffer, transport, etc.
+        </span>
+        <span className="font-mono text-xs font-medium text-danger-600">
+          ({fmt(costsDeducted)})
+        </span>
+      </div>
+      <div className="flex items-baseline justify-between border-b border-gray-200 py-1.5">
+        <span className="text-xs font-medium text-gray-800">Pool</span>
+        <span className="font-mono text-xs font-medium text-accent-600">
+          {fmt(pool)}
+        </span>
+      </div>
+      <div className="flex items-baseline justify-between border-b border-gray-200 py-1.5">
+        <span className="text-xs text-gray-600">Full intro chunk</span>
+        <span className="font-mono text-xs font-medium text-purple-600">
+          {fmt(introChunk)}
+        </span>
+      </div>
+      <div className="flex items-baseline justify-between border-b border-gray-200 py-1.5">
+        <span className="text-xs text-gray-600">
+          Direct introducer&apos;s slice — {directTierName} tier ({directTierRate}%)
+        </span>
+        <span className="font-mono text-xs font-medium text-gray-500">
+          ({fmt(Math.abs(directSlice))})
+        </span>
+      </div>
+      <div className="mt-1 flex items-baseline justify-between border-t-2 border-gray-300 pt-2.5">
+        <span
+          className={cn(
+            "text-xs font-medium",
+            isLoss ? "text-danger-600" : "text-purple-600"
+          )}
+        >
+          Your upline {isLoss ? "loss share" : "slice"}
+        </span>
+        <span
+          className={cn(
+            "font-mono text-sm font-semibold",
+            isLoss ? "text-danger-600" : "text-purple-600"
+          )}
+        >
+          {fmtSigned(uplineSlice)}
         </span>
       </div>
     </div>

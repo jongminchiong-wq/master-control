@@ -86,6 +86,7 @@ function toWaterfallPlayer(p: DBPlayer): WaterfallPlayer {
     introTierModeProxy: p.intro_tier_mode_proxy,
     introTierModeGrid: p.intro_tier_mode_grid,
     introducedBy: p.introduced_by,
+    uplineId: p.upline_id,
   };
 }
 
@@ -1190,6 +1191,9 @@ function PORow({
   const intro = eu?.introduced_by
     ? players.find((p) => p.id === eu.introduced_by)
     : undefined;
+  const upline = intro?.upline_id
+    ? players.find((p) => p.id === intro.upline_id)
+    : undefined;
   const status = getPOStatus(po);
   const dos = po.delivery_orders ?? [];
   const paidDOs = dos.filter((d) => d.buyer_paid).length;
@@ -1835,7 +1839,7 @@ function PORow({
                     Waterfall)
                   </p>
                   <WaterfallTable
-                    rows={buildWaterfallRows(waterfall, po, intro)}
+                    rows={buildWaterfallRows(waterfall, po, intro, upline)}
                   />
                   {waterfall.rawLoss > 0 && (
                     <p className="mt-2 rounded-md border border-danger-100 bg-danger-50 p-2 text-[10px] text-danger-600">
@@ -1868,7 +1872,8 @@ function PORow({
 function buildWaterfallRows(
   w: ReturnType<typeof calcPOWaterfall>,
   po: DBPO,
-  intro: DBPlayer | undefined
+  intro: DBPlayer | undefined,
+  upline: DBPlayer | undefined
 ): WaterfallRow[] {
   const rows: WaterfallRow[] = [
     {
@@ -1941,10 +1946,21 @@ function buildWaterfallRows(
   if (w.intro) {
     const introName = intro?.name ? `${intro.name} · ` : "";
     rows.push({
-      label: `Player Introducer (${introName}${w.introRate}% of Entity Gross)`,
+      label: w.upline
+        ? `Player Introducer (${introName}keeps ${w.introRate}% of chunk)`
+        : `Player Introducer (${introName}${w.introRate}% of Entity Gross)`,
       val: -w.introAmt,
       color: "purple",
     });
+    if (w.upline) {
+      const uplineName = upline?.name ? `${upline.name} · ` : "";
+      const uplinePct = 100 - w.introRate;
+      rows.push({
+        label: `Upline Introducer (${uplineName}gets ${uplinePct}% of chunk)`,
+        val: -w.uplineAmt,
+        color: "purple",
+      });
+    }
   }
 
   rows.push({
@@ -1969,10 +1985,21 @@ function buildWaterfallRows(
     if (w.intro) {
       const introName = intro?.name ? `${intro.name} · ` : "";
       rows.push({
-        label: `Introducer Absorbs (${introName}${w.introRate}% mirror)`,
+        label: w.upline
+          ? `Introducer Absorbs (${introName}${w.introRate}% of chunk loss)`
+          : `Introducer Absorbs (${introName}${w.introRate}% mirror)`,
         val: w.introducerLossShare,
         color: "danger",
       });
+      if (w.upline) {
+        const uplineName = upline?.name ? `${upline.name} · ` : "";
+        const uplinePct = 100 - w.introRate;
+        rows.push({
+          label: `Upline Absorbs (${uplineName}${uplinePct}% of chunk loss)`,
+          val: w.uplineLossShare,
+          color: "danger",
+        });
+      }
     }
     rows.push({
       label: "Entity Absorbs",
