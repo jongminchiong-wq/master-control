@@ -99,19 +99,6 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl)
   }
 
-  // ── Enforce 2FA enrollment for player/investor ─────────────
-  // currentLevel === "aal1" AND nextLevel === "aal1" means the user
-  // has no verified TOTP factor. Force them to /security to enroll.
-  // (Users mid-challenge are handled by the earlier aal block.)
-  if (
-    (role === "player" || role === "investor") &&
-    aal?.currentLevel === "aal1" &&
-    aal?.nextLevel === "aal1" &&
-    pathname !== "/security"
-  ) {
-    return NextResponse.redirect(new URL("/security", request.url))
-  }
-
   // ── Redirect /login and / to the correct dashboard ─────────
   if (pathname === "/login" || pathname === "/") {
     return NextResponse.redirect(

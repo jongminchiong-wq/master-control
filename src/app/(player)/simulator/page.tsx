@@ -330,6 +330,34 @@ export default function PlayerSimulatorPage() {
         </div>
       </div>
 
+      {/* ── Channel ─────────────────────────────────────────── */}
+      <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+        <p className="mb-4 text-xs font-medium uppercase tracking-wide text-brand-600">
+          Channel
+        </p>
+        <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5 text-xs">
+          {(
+            [
+              { id: "punchout", label: "P" },
+              { id: "gep", label: "G" },
+            ] as const
+          ).map((ch) => (
+            <button
+              key={ch.id}
+              onClick={() => setChannel(ch.id)}
+              className={cn(
+                "rounded px-4 py-1.5 font-medium transition-colors",
+                channel === ch.id
+                  ? "bg-brand-600 text-white shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              )}
+            >
+              {ch.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* ── My PO ───────────────────────────────────────────── */}
       <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <p className="mb-4 text-xs font-medium uppercase tracking-wide text-brand-600">
@@ -337,32 +365,6 @@ export default function PlayerSimulatorPage() {
         </p>
 
         <div className="space-y-6">
-          {/* Channel segmented control */}
-          <div className="space-y-2">
-            <p className="text-xs text-gray-500">Channel</p>
-            <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5 text-xs">
-              {(
-                [
-                  { id: "punchout", label: "P" },
-                  { id: "gep", label: "G" },
-                ] as const
-              ).map((ch) => (
-                <button
-                  key={ch.id}
-                  onClick={() => setChannel(ch.id)}
-                  className={cn(
-                    "rounded px-4 py-1.5 font-medium transition-colors",
-                    channel === ch.id
-                      ? "bg-brand-600 text-white shadow-sm"
-                      : "text-gray-500 hover:text-gray-700"
-                  )}
-                >
-                  {ch.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Monthly PO slider */}
           <div className="space-y-3">
             <div className="flex items-baseline justify-between">
