@@ -261,10 +261,14 @@ export default function PlayerSimulatorPage() {
 
       {/* ── Summary MetricCards ─────────────────────────────── */}
       {(() => {
+        const playerActive = monthlyPO > 0;
+        const introActive = numRecruits > 0;
+        const downlineActive = numDownlineRecruits > 0;
         const activeCount =
-          1 +
-          (numRecruits > 0 ? 1 : 0) +
-          (numDownlineRecruits > 0 ? 1 : 0);
+          (playerActive ? 1 : 0) +
+          (introActive ? 1 : 0) +
+          (downlineActive ? 1 : 0);
+        if (activeCount === 0) return null;
         const cols =
           activeCount === 3
             ? "grid-cols-3"
@@ -273,13 +277,15 @@ export default function PlayerSimulatorPage() {
               : "grid-cols-1";
         return (
           <div className={cn("grid gap-4", cols)}>
-            <MetricCard
-              label="Player Commission"
-              value={fmt(euAmt)}
-              subtitle={`${euTier.name} · ${euTier.rate}% of pool`}
-              color="brand"
-            />
-            {numRecruits > 0 && (
+            {playerActive && (
+              <MetricCard
+                label="Player Commission"
+                value={fmt(euAmt)}
+                subtitle={`${euTier.name} · ${euTier.rate}% of pool`}
+                color="brand"
+              />
+            )}
+            {introActive && (
               <MetricCard
                 label="Introducer Commission"
                 value={fmt(totalIntroAmt)}
@@ -287,7 +293,7 @@ export default function PlayerSimulatorPage() {
                 color="purple"
               />
             )}
-            {numDownlineRecruits > 0 && (
+            {downlineActive && (
               <MetricCard
                 label="Downline Commission"
                 value={fmt(totalDownlineAmt)}
