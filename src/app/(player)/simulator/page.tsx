@@ -146,7 +146,7 @@ export default function PlayerSimulatorPage() {
 
   const [channel, setChannel] = useState<"punchout" | "gep">("punchout");
   const [cogsPercent, setCogsPercent] = useState(80);
-  const [monthlyPO, setMonthlyPO] = useState(100000);
+  const [monthlyPO, setMonthlyPO] = useState(0);
   const [numRecruits, setNumRecruits] = useState(0);
   const [avgRecruitPO, setAvgRecruitPO] = useState(50000);
   const [numDownlineRecruits, setNumDownlineRecruits] = useState(0);
