@@ -373,47 +373,6 @@ export default function PlayerDashboardPage() {
         </>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
-        <MetricCard
-          label="Player Commission"
-          value={fmtSigned(myEUComm)}
-          color={myEUComm < 0 ? "danger" : "brand"}
-        >
-          <div className="mt-1 flex gap-2.5">
-            <span
-              className={cn(
-                "text-[10px] font-medium",
-                clearedEUComm < 0 ? "text-danger-600" : "text-success-600"
-              )}
-            >
-              Cleared {fmtSigned(clearedEUComm)}
-            </span>
-            <span
-              className={cn(
-                "text-[10px] font-medium",
-                pendingEUComm < 0 ? "text-danger-600" : "text-amber-600"
-              )}
-            >
-              Pending {fmtSigned(pendingEUComm)}
-            </span>
-          </div>
-        </MetricCard>
-        <MetricCard
-          label="Intro Commission"
-          value={fmtSigned(totalIntroComm)}
-          color="purple"
-        >
-          <div className="mt-1 flex gap-2.5">
-            <span className="text-[10px] font-medium text-success-600">
-              Cleared {fmtSigned(clearedIntroComm)}
-            </span>
-            <span className="text-[10px] font-medium text-amber-600">
-              Pending {fmtSigned(pendingIntroComm)}
-            </span>
-          </div>
-        </MetricCard>
-      </div>
-
       {/* ═══ SIMULATOR TEASER ═══ */}
       <div className="rounded-2xl bg-brand-50 px-6 py-5">
         <p className="text-sm font-semibold text-brand-800">
