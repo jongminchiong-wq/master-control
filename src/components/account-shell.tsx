@@ -5,10 +5,12 @@ import {
   ArrowDownToLine,
   Building2,
   Calculator,
+  DollarSign,
   Home,
   Inbox,
   Package,
   RefreshCcw,
+  TrendingUp,
   Users,
   Wallet,
   type LucideIcon,
@@ -42,6 +44,9 @@ const PLAYER_NAV: NavItem[] = [
 
 const INVESTOR_NAV: NavItem[] = [
   { href: "/portfolio", label: "Home", icon: Home },
+  { href: "/deployments", label: "Deployments", icon: DollarSign },
+  { href: "/cycle-history", label: "Cycle History", icon: TrendingUp },
+  { href: "/network", label: "Investors Network", icon: Users },
   { href: "/wallet", label: "Wallet", icon: Wallet },
 ];
 
