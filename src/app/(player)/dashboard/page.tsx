@@ -26,6 +26,9 @@ export default function PlayerDashboardPage() {
   const [data, setData] = useState<APICommissionResponse | null>(null);
   const [lossDebits, setLossDebits] = useState<DBLossDebit[]>([]);
   const [commissionLedger, setCommissionLedger] = useState<DBCommission[]>([]);
+  // Mirrors players.allow_introducer for the logged-in player. When false,
+  // the dashboard hides all introducer-derived earnings from the summary.
+  const [allowIntroducer, setAllowIntroducer] = useState(false);
   const [loading, setLoading] = useState(true);
   const [errorState, setErrorState] = useState<
     "not_authenticated" | "no_player" | null
@@ -54,7 +57,7 @@ export default function PlayerDashboardPage() {
     setData(json);
 
     // Per-player ledger tables still come direct from Supabase (own data via RLS).
-    const [debitsRes, commsRes] = await Promise.all([
+    const [debitsRes, commsRes, playerRes] = await Promise.all([
       supabase
         .from("player_loss_debits")
         .select("*")
@@ -65,9 +68,15 @@ export default function PlayerDashboardPage() {
         .select("*")
         .eq("player_id", json.me.id)
         .order("created_at", { ascending: true }),
+      supabase
+        .from("players")
+        .select("allow_introducer")
+        .eq("id", json.me.id)
+        .single(),
     ]);
     if (debitsRes.data) setLossDebits(debitsRes.data);
     if (commsRes.data) setCommissionLedger(commsRes.data);
+    if (playerRes.data) setAllowIntroducer(playerRes.data.allow_introducer);
     setLoading(false);
   }, [supabase]);
 
@@ -148,6 +157,9 @@ export default function PlayerDashboardPage() {
   );
 
   const introTotals = useMemo(() => {
+    // Admin hid the introducer network for this player — pretend they have no
+    // recruit/upline earnings. Existing rows stay in the DB, just not surfaced.
+    if (!allowIntroducer) return { earned: 0, cleared: 0 };
     if (recruitIds.size === 0 && uplineRecruitIds.size === 0)
       return { earned: 0, cleared: 0 };
     let earned = 0;
@@ -168,7 +180,7 @@ export default function PlayerDashboardPage() {
       if (getCommissionStatus(p.po) === "cleared") cleared += net;
     }
     return { earned, cleared };
-  }, [allAPIPOs, recruitIds, uplineRecruitIds, selectedMonth]);
+  }, [allowIntroducer, allAPIPOs, recruitIds, uplineRecruitIds, selectedMonth]);
 
   const totalIntroComm = introTotals.earned;
   const clearedIntroComm = introTotals.cleared;
@@ -206,6 +218,7 @@ export default function PlayerDashboardPage() {
   const lifetimeIntroTotals = useMemo(() => {
     let earned = 0;
     let pending = 0;
+    if (!allowIntroducer) return { earned, pending };
     if (recruitIds.size === 0 && uplineRecruitIds.size === 0)
       return { earned, pending };
     for (const p of allAPIPOs) {
@@ -223,7 +236,7 @@ export default function PlayerDashboardPage() {
       if (!p.po.commissions_cleared) pending += net;
     }
     return { earned, pending };
-  }, [allAPIPOs, recruitIds, uplineRecruitIds]);
+  }, [allowIntroducer, allAPIPOs, recruitIds, uplineRecruitIds]);
 
   const lifetimeEarned = lifetimeEUTotals.earned + lifetimeIntroTotals.earned;
   const lifetimePending = Math.max(
@@ -378,17 +391,26 @@ export default function PlayerDashboardPage() {
         <p className="text-sm font-semibold text-brand-800">
           Want to see how much you can earn?
         </p>
-        <p className="mt-2 text-xs leading-relaxed text-brand-600">
-          There are two ways to earn with us:
-        </p>
-        <ul className="mt-1 ml-4 list-disc space-y-0.5 text-xs leading-relaxed text-brand-600">
-          <li>Bring in your own POs.</li>
-          <li>Or invite other players who bring in POs.</li>
-        </ul>
-        <p className="mt-2 text-xs leading-relaxed text-brand-600">
-          Both ways pay you a commission. Open the simulator to see what
-          each way could pay.
-        </p>
+        {allowIntroducer ? (
+          <>
+            <p className="mt-2 text-xs leading-relaxed text-brand-600">
+              There are two ways to earn with us:
+            </p>
+            <ul className="mt-1 ml-4 list-disc space-y-0.5 text-xs leading-relaxed text-brand-600">
+              <li>Bring in your own POs.</li>
+              <li>Or invite other players who bring in POs.</li>
+            </ul>
+            <p className="mt-2 text-xs leading-relaxed text-brand-600">
+              Both ways pay you a commission. Open the simulator to see what
+              each way could pay.
+            </p>
+          </>
+        ) : (
+          <p className="mt-2 text-xs leading-relaxed text-brand-600">
+            Bring in your own POs and earn a commission on every one. Open
+            the simulator to see what your monthly PO volume could pay.
+          </p>
+        )}
         <Link
           href="/simulator"
           className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 hover:text-brand-800"

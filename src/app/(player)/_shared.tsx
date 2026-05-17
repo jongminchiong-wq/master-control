@@ -240,13 +240,15 @@ export function PayoutTimeline({ po }: { po: DBPO }) {
   const dos = po.delivery_orders ?? [];
   const hasDOs = dos.length > 0;
   const allDelivered = hasDOs && dos.every((d) => d.delivered);
+  const allGRNReceived = hasDOs && dos.every((d) => d.invoiced);
   const allPaid = hasDOs && dos.every((d) => d.buyer_paid);
   const isCleared = !!po.commissions_cleared;
 
   let currentStep = 0;
   if (hasDOs && !allDelivered) currentStep = 1;
-  else if (allDelivered && !allPaid) currentStep = 2;
-  else if (allPaid && !isCleared) currentStep = 3;
+  else if (allDelivered && !allGRNReceived) currentStep = 2;
+  else if (allGRNReceived && !allPaid) currentStep = 3;
+  else if (allPaid && !isCleared) currentStep = 4;
   else if (isCleared) currentStep = 5;
 
   function state(step: number): TimelineStepState {
@@ -265,9 +267,9 @@ export function PayoutTimeline({ po }: { po: DBPO }) {
       <TimelineLine done={s(1) === "done" || s(1) === "current"} />
       <TimelineStep label="All Delivered" state={s(1)} />
       <TimelineLine done={s(2) === "done" || s(2) === "current"} />
-      <TimelineStep label="All Paid" state={s(2)} />
+      <TimelineStep label="GRN Received" state={s(2)} />
       <TimelineLine done={s(3) === "done" || s(3) === "current"} />
-      <TimelineStep label="Payable" state={s(3)} />
+      <TimelineStep label="Buyer Paid" state={s(3)} />
       <TimelineLine done={s(4) === "done"} />
       <TimelineStep label="Cleared" state={s(4)} />
     </div>

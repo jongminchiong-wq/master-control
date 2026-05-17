@@ -1,45 +1,30 @@
-"use client";
+import { createClient } from "@/lib/supabase/server";
+import { PlayerChrome } from "./_chrome";
 
-import { Suspense } from "react";
-import {
-  Home,
-  Wallet,
-  FileText,
-  Users,
-} from "lucide-react";
-import { Sidebar } from "@/components/sidebar";
-import { MobileBottomNav } from "@/components/mobile-bottom-nav";
-import { Header } from "@/components/header";
-import { Footer } from "@/components/footer";
-import { PlayerMonthProvider } from "./_month-context";
-
-const navItems = [
-  { href: "/dashboard", label: "Home", icon: Home },
-  { href: "/my-pos", label: "My Purchase Order", icon: FileText },
-  { href: "/introducer-commission", label: "Introducer Commission", icon: Users },
-  { href: "/withdrawals", label: "Withdrawals", icon: Wallet },
-];
-
-export default function PlayerLayout({
+export default async function PlayerLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Proxy.ts already gates this route group to authenticated players, so
+  // `user` is guaranteed here. Fetch the per-player flag that decides
+  // whether the Introducer Commission tab appears in the nav.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  let allowIntroducer = false;
+  if (user) {
+    const { data } = await supabase
+      .from("players")
+      .select("allow_introducer")
+      .eq("user_id", user.id)
+      .single();
+    allowIntroducer = data?.allow_introducer ?? false;
+  }
+
   return (
-    <div className="flex h-screen">
-      <div className="hidden md:flex">
-        <Suspense><Sidebar navItems={navItems} /></Suspense>
-      </div>
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Header containerClass="mx-auto max-w-5xl" />
-        <main className="flex flex-1 flex-col overflow-auto bg-gray-50 px-6 pb-24 pt-6 md:pb-6">
-          <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col">
-            <PlayerMonthProvider>{children}</PlayerMonthProvider>
-            <Footer />
-          </div>
-        </main>
-      </div>
-      <Suspense><MobileBottomNav navItems={navItems} /></Suspense>
-    </div>
+    <PlayerChrome showIntroducer={allowIntroducer}>{children}</PlayerChrome>
   );
 }

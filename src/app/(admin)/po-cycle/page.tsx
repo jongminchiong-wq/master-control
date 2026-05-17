@@ -152,7 +152,7 @@ function getDOStatus(d: DBDO): DOStatus {
 const doStatusConfig: Record<DOStatus, { label: string; bg: string; text: string }> = {
   paid: { label: "Paid", bg: "bg-success-50", text: "text-success-800" },
   overdue: { label: "Overdue", bg: "bg-danger-50", text: "text-danger-800" },
-  invoiced: { label: "Invoiced", bg: "bg-amber-50", text: "text-amber-600" },
+  invoiced: { label: "GRN Received", bg: "bg-amber-50", text: "text-amber-600" },
   delivered: { label: "Delivered", bg: "bg-purple-50", text: "text-purple-800" },
   "supplier-paid": { label: "Supplier Paid", bg: "bg-amber-50", text: "text-amber-600" },
   pending: { label: "Pending", bg: "bg-gray-100", text: "text-gray-500" },
@@ -184,7 +184,7 @@ const STAGES: StageInfo[] = [
     matchStatuses: ["supplier-paid", "delivered"],
   },
   {
-    name: "Invoiced",
+    name: "GRN Received",
     color: "text-amber-600",
     borderColor: "border-l-amber-400",
     description: "Awaiting payment",
@@ -1554,7 +1554,7 @@ function PORow({
                             "Risk-Adj",
                             "Supplier Paid",
                             "Delivered",
-                            "Invoiced",
+                            "GRN Received",
                             "Buyer Paid",
                             "Status",
                             "",

@@ -59,6 +59,7 @@ export default function PlayerSimulatorPage() {
     eu_tier_mode_grid: EUGridMode;
     intro_tier_mode_proxy: IntroMode;
     intro_tier_mode_grid: IntroMode;
+    allow_introducer: boolean;
   } | null>(null);
   const [myUpline, setMyUpline] = useState<{
     intro_tier_mode_proxy: IntroMode;
@@ -81,7 +82,7 @@ export default function PlayerSimulatorPage() {
       const { data: playerData } = await supabase
         .from("players")
         .select(
-          "id, eu_tier_mode_proxy, eu_tier_mode_grid, intro_tier_mode_proxy, intro_tier_mode_grid"
+          "id, eu_tier_mode_proxy, eu_tier_mode_grid, intro_tier_mode_proxy, intro_tier_mode_grid, allow_introducer"
         )
         .eq("user_id", user.id)
         .single();
@@ -99,10 +100,15 @@ export default function PlayerSimulatorPage() {
         eu_tier_mode_grid: narrowGrid(playerData.eu_tier_mode_grid),
         intro_tier_mode_proxy: narrowIntro(playerData.intro_tier_mode_proxy),
         intro_tier_mode_grid: narrowIntro(playerData.intro_tier_mode_grid),
+        allow_introducer: playerData.allow_introducer,
       });
 
-      // Migration 027 SECURITY DEFINER RPC. types.ts not regenerated yet, so
-      // bridge through `unknown`. Returns null when caller has no upline.
+      // Skip upline + downline lookups entirely when the admin disabled this
+      // player's introducer network — the simulator hides those cards, so
+      // the data would never be rendered.
+      if (!playerData.allow_introducer) return;
+
+      // Migration 027 SECURITY DEFINER RPC. Returns null when caller has no upline.
       type UplineTiersRpc = {
         intro_tier_mode_proxy: string | null;
         intro_tier_mode_grid: string | null;
@@ -143,6 +149,9 @@ export default function PlayerSimulatorPage() {
   const euTierModeGrid = myPlayer?.eu_tier_mode_grid ?? "A";
   const introTierModeProxy = myPlayer?.intro_tier_mode_proxy ?? "A";
   const introTierModeGrid = myPlayer?.intro_tier_mode_grid ?? "A";
+  // Default to false during initial load so introducer cards don't flash
+  // before the player record arrives.
+  const allowIntroducer = myPlayer?.allow_introducer ?? false;
 
   const [channel, setChannel] = useState<"punchout" | "gep">("punchout");
   const [cogsPercent, setCogsPercent] = useState(80);
@@ -262,8 +271,8 @@ export default function PlayerSimulatorPage() {
       {/* ── Summary MetricCards ─────────────────────────────── */}
       {(() => {
         const playerActive = monthlyPO > 0;
-        const introActive = numRecruits > 0;
-        const downlineActive = numDownlineRecruits > 0;
+        const introActive = allowIntroducer && numRecruits > 0;
+        const downlineActive = allowIntroducer && numDownlineRecruits > 0;
         const activeCount =
           (playerActive ? 1 : 0) +
           (introActive ? 1 : 0) +
@@ -411,6 +420,7 @@ export default function PlayerSimulatorPage() {
       </div>
 
       {/* ── Introducer Network ──────────────────────────────── */}
+      {allowIntroducer && (
       <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
         <p className="mb-4 text-xs font-medium uppercase tracking-wide text-purple-600">
           Introducer Network
@@ -479,9 +489,10 @@ export default function PlayerSimulatorPage() {
           )}
         </div>
       </div>
+      )}
 
       {/* ── Downline Network ────────────────────────────────── */}
-      {myDownlines.length > 0 && (
+      {allowIntroducer && myDownlines.length > 0 && (
         <div className="rounded-2xl bg-white p-6 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
           <p className="mb-4 text-xs font-medium uppercase tracking-wide text-accent-600">
             Downline Network

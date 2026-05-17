@@ -198,7 +198,8 @@ function PlayersPageContent() {
   // Month selector (URL-driven, shared across admin pages)
   const [selectedMonth, setSelectedMonth] = useSelectedMonth();
 
-  // Form state — DB defaults: eu_proxy 'A', eu_grid 'B', intro_proxy 'A', intro_grid 'A'
+  // Form state — DB defaults: eu_proxy 'A', eu_grid 'B', intro_proxy 'A', intro_grid 'A'.
+  // allow_introducer defaults to false for newly-added players; admin opts in.
   const emptyForm = {
     name: "",
     eu_tier_mode_proxy: "A" as EUProxyMode,
@@ -207,6 +208,7 @@ function PlayersPageContent() {
     intro_tier_mode_grid: "A" as IntroMode,
     introduced_by: "",
     upline_id: "",
+    allow_introducer: false,
   };
   const [form, setForm] = useState(emptyForm);
 
@@ -369,6 +371,7 @@ function PlayersPageContent() {
       intro_tier_mode_grid: form.intro_tier_mode_grid,
       introduced_by: form.introduced_by || null,
       upline_id: form.upline_id || null,
+      allow_introducer: form.allow_introducer,
     });
     setForm(emptyForm);
     setShowAddDialog(false);
@@ -389,6 +392,7 @@ function PlayersPageContent() {
         intro_tier_mode_grid: form.intro_tier_mode_grid,
         introduced_by: form.introduced_by || null,
         upline_id: form.upline_id || null,
+        allow_introducer: form.allow_introducer,
       })
       .eq("id", editingPlayer.id);
     setEditingPlayer(null);
@@ -446,6 +450,7 @@ function PlayersPageContent() {
       intro_tier_mode_grid: narrowIntro(player.intro_tier_mode_grid),
       introduced_by: player.introduced_by ?? "",
       upline_id: player.upline_id ?? "",
+      allow_introducer: player.allow_introducer,
     });
     setEditingPlayer(player);
   }
@@ -689,6 +694,7 @@ function PlayerFormDialog({
     intro_tier_mode_grid: IntroMode;
     introduced_by: string;
     upline_id: string;
+    allow_introducer: boolean;
   };
   setForm: (
     f: typeof form | ((prev: typeof form) => typeof form)
@@ -826,6 +832,38 @@ function PlayerFormDialog({
                 ))}
               </div>
             </div>
+          </div>
+
+          {/* Introducer Network — controls whether the player UI shows
+              the Introducer Commission tab + simulator cards. Display only;
+              commission math is unaffected. Default for new players: Off. */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">
+              Introducer Network
+            </label>
+            <div className="flex gap-1">
+              {([false, true] as const).map((opt) => (
+                <button
+                  key={String(opt)}
+                  type="button"
+                  onClick={() =>
+                    setForm((prev) => ({ ...prev, allow_introducer: opt }))
+                  }
+                  className={cn(
+                    "flex-1 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors",
+                    form.allow_introducer === opt
+                      ? "bg-purple-50 text-purple-600 ring-2 ring-purple-400"
+                      : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                  )}
+                >
+                  {opt ? "On" : "Off"}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-[10px] leading-snug text-gray-500">
+              When Off, this player&apos;s app hides the Introducer Commission
+              tab and the simulator&apos;s Introducer + Downline cards.
+            </p>
           </div>
 
           {/* Introduced By */}
@@ -1024,7 +1062,14 @@ function PlayerRow({
           )}
         </TableCell>
         <TableCell className="font-medium text-gray-800">
-          {player.name}
+          <div className="flex items-center gap-1.5">
+            <span>{player.name}</span>
+            {player.allow_introducer && (
+              <span className="rounded bg-purple-50 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-purple-600 ring-1 ring-purple-200">
+                +Intro
+              </span>
+            )}
+          </div>
         </TableCell>
         <TableCell>
           {(stats?.punchTotal ?? 0) === 0 && (stats?.gepTotal ?? 0) === 0 ? (

@@ -577,6 +577,7 @@ export type Database = {
       }
       players: {
         Row: {
+          allow_introducer: boolean
           created_at: string | null
           eu_tier_mode_grid: string
           eu_tier_mode_proxy: string
@@ -590,6 +591,7 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          allow_introducer?: boolean
           created_at?: string | null
           eu_tier_mode_grid?: string
           eu_tier_mode_proxy?: string
@@ -603,6 +605,7 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          allow_introducer?: boolean
           created_at?: string | null
           eu_tier_mode_grid?: string
           eu_tier_mode_proxy?: string
